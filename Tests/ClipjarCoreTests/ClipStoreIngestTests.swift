@@ -100,7 +100,15 @@ import Testing
     func bumpDoesNotTouchFTS(_ backend: Backend) async throws {
         let fx = try makeStore(backend)
         try await fx.store.ingest(text("Hello, Clipjar"), source: textEdit, at: t0)
-        try await fx.store.ingest(text("Hello, Clipjar"), source: safari, at: t0 + 60)
+        // Fires exactly when an UPDATE's SET list includes searchText, as the FTS update trigger does.
+        try await fx.writer.write { db in
+            try db.execute(sql: """
+                CREATE TABLE au_log(n);
+                CREATE TRIGGER au_probe AFTER UPDATE OF searchText ON clip BEGIN INSERT INTO au_log VALUES(1); END;
+                """)
+        }
+        try await fx.store.ingest(text("Hello, Clipjar", rtf: Data("{\\rtf1 Hello}".utf8)), source: safari, at: t0 + 60)
+        #expect(try await fx.writer.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM au_log") } == 0)
         let rows = try await fx.writer.read { try ClipQuery(terms: ["hello"]).fetchRows($0) }
         #expect(rows.count == 1)
     }

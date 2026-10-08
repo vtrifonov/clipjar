@@ -157,7 +157,8 @@ extension ClipStore {
         blobs.remove(deleted.blobNames)
         guard deleted.count > 0 else { return 0 }
         markScrubPending(.optimize)
-        if lastScrubAt.map({ now.timeIntervalSince($0) >= 3600 }) ?? true {
+        // abs: a clock set backwards must not postpone the scrub until it catches up again.
+        if lastScrubAt.map({ abs(now.timeIntervalSince($0)) >= 3600 }) ?? true {
             try scrubAfterCommittedDelete(.optimize, at: now)
         }
         return deleted.count
@@ -195,8 +196,15 @@ extension ClipStore {
         try writer.write { db in
             try db.execute(sql: "INSERT INTO clip_fts(clip_fts) VALUES(?)", arguments: [command.rawValue])
         }
-        try writer.writeWithoutTransaction { db in
-            try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+        // A reader holding a snapshot makes the checkpoint report busy (column 0) instead of throwing;
+        // deleted bytes may then still sit in the WAL, so the scrub stays pending.
+        let busy = try writer.writeWithoutTransaction { db in
+            try Int.fetchOne(db, sql: "PRAGMA wal_checkpoint(TRUNCATE)") ?? 0
+        }
+        if busy != 0 {
+            markScrubPending(command)
+            Log.store.error("scrub checkpoint busy")
+            return
         }
         optimizeRunCount += 1
         lastScrubCommand = command

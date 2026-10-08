@@ -50,6 +50,22 @@ import Testing
         #expect(try clipCount(fx.writer) == 199)
     }
 
+    /// Limit ⊋ age: the limit must still apply while an age rule is active.
+    @Test(arguments: Backend.allCases)
+    func limitWiderThanAgeUnion(_ backend: Backend) async throws {
+        let fx = try makeStore(backend)
+        let old = try seed(fx.writer, [
+            Clip.make("old a", at: t0 - 9 * day), Clip.make("mid b", at: t0 - 2 * day), Clip.make("mid c", at: t0 - day),
+        ])
+        try seed(fx.writer, items(200))
+        #expect(try await fx.store.pruneCount(limit: .unlimited, maxAgeDays: 7, now: t0 + 1000) == 1)
+        #expect(try await fx.store.pruneCount(limit: .l200, maxAgeDays: 0, now: t0 + 1000) == 3)
+        #expect(try await fx.store.pruneCount(limit: .l200, maxAgeDays: 7, now: t0 + 1000) == 3)
+        #expect(try await fx.store.prune(limit: .l200, maxAgeDays: 7, now: t0 + 1000) == 3)
+        #expect(try ids(fx.writer, pinned: false).isDisjoint(with: old))
+        #expect(try clipCount(fx.writer) == 200)
+    }
+
     @Test(arguments: Backend.allCases)
     func noopWhenUnlimitedAndAgeOff(_ backend: Backend) async throws {
         let fx = try makeStore(backend)
