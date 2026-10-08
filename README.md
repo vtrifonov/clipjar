@@ -102,3 +102,7 @@ Quit Clipjar from its menu bar icon, delete `Clipjar.app` from Applications, the
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Clipjar uses [GRDB.swift](https://github.com/groue/GRDB.swift) and
+[KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts), both MIT-licensed. Their notices are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and ship inside `Clipjar.app/Contents/Resources`.
