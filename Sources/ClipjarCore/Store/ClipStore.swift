@@ -286,3 +286,48 @@ extension ClipStore {
         return deleted.count
     }
 }
+
+extension ClipStore {
+    public nonisolated func rowsObservation(_ q: ClipQuery) -> ValueObservation<ValueReducers.Fetch<[ClipRow]>> {
+        ValueObservation.tracking { try q.fetchRows($0) }
+    }
+
+    public nonisolated func countObservation(_ q: ClipQuery) -> ValueObservation<ValueReducers.Fetch<Int>> {
+        ValueObservation.tracking { try q.fetchCount($0) }
+    }
+
+    public nonisolated func clipObservation(id: Int64) -> ValueObservation<ValueReducers.Fetch<Clip?>> {
+        ValueObservation.tracking { try Clip.fetchOne($0, key: id) }
+    }
+
+    /// Deletes blob files older than the grace period that no row references; `.tmp` files are deleted
+    /// once older than the grace regardless. Individual delete errors are logged and skipped.
+    @discardableResult
+    public func cleanOrphanBlobs(now: Date, graceSeconds: TimeInterval = 60) throws -> Int {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: blobsDirectory.path) else { return 0 }
+        let referenced = try reader.read { db in
+            Set(try String.fetchAll(db, sql: """
+                SELECT imagePath FROM clip WHERE imagePath IS NOT NULL
+                UNION SELECT thumbnailPath FROM clip WHERE thumbnailPath IS NOT NULL
+                """))
+        }
+        let cutoff = now.addingTimeInterval(-graceSeconds)
+        var deleted = 0
+        for name in try fm.contentsOfDirectory(atPath: blobsDirectory.path) {
+            guard name.hasSuffix(".tmp") || !referenced.contains(name) else { continue }
+            let url = blobs.url(name)
+            guard let modified = try? fm.attributesOfItem(atPath: url.path)[.modificationDate] as? Date,
+                  modified < cutoff
+            else { continue }
+            do {
+                try fm.removeItem(at: url)
+                deleted += 1
+            } catch {
+                let e = error as NSError
+                Log.store.error("orphan blob remove failed: \(e.domain, privacy: .public) \(e.code, privacy: .public)")
+            }
+        }
+        return deleted
+    }
+}
