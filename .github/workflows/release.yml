@@ -1,0 +1,23 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+env:
+  XCODE_VERSION: "26.0"
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+      - run: swift --version
+      - run: make test
+      - name: Build Clipjar.zip
+        run: make zip VERSION="${GITHUB_REF_NAME#v}" BUILD_NUMBER="${{ github.run_number }}"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/Clipjar.zip --title "Clipjar $GITHUB_REF_NAME" --generate-notes
