@@ -71,6 +71,15 @@ import Observation
     private static let undoWindow: TimeInterval = 5
     private static let pinnedConfirmationWindow: TimeInterval = 2
 
+    @ObservationIgnored private var systemBanners: Set<Banner> = []
+    @ObservationIgnored private var launchBanners: Set<Banner> = []
+    @ObservationIgnored private var runtimeBanners: Set<Banner> = []
+    @ObservationIgnored private var storageErrorExpiry: (any Cancellable)?
+    private static let storageErrorDuration: TimeInterval = 6
+    /// Set while `prepareForOpen` resets the query and filter, so they don't restart observations twice.
+    @ObservationIgnored private var suppressRestart = false
+    @ObservationIgnored private var scrollToFirstOnNextRows = false
+
     public init(
         store: ClipStore,
         actions: HistoryActions,
@@ -143,6 +152,73 @@ import Observation
         case .undoDelete: return undoDelete()
         }
         return true
+    }
+
+    // MARK: Open and banners
+
+    /// Resets the panel for a new open. Observations restart only after the open-time prune, so rows for
+    /// this open never include clips the prune removes.
+    @discardableResult
+    public func prepareForOpen() -> Task<Void, Never> {
+        rowsTask?.cancel()
+        matchTask?.cancel()
+        suppressRestart = true
+        query = ""
+        filter = .all
+        suppressRestart = false
+        limit = Self.pageSize
+        openGeneration += 1
+        systemBanners = actions.systemBanners()
+        updateBanners()
+        let prune = actions.prune
+        return Task { [weak self] in
+            await prune()
+            guard let self else { return }
+            scrollToFirstOnNextRows = true
+            startObservations(selectFirst: true)
+        }
+    }
+
+    public func setLaunchBanners(recovered: Bool, storageUnavailable: Bool) {
+        if recovered { launchBanners.insert(.recoveredFromCorruption) }
+        if storageUnavailable { launchBanners.insert(.storageUnavailable) }
+        updateBanners()
+    }
+
+    /// `.writeFailed` shows a storage error that hides itself; `.corrupt` stays until dismissed.
+    public func report(_ event: StoreEvent) {
+        switch event {
+        case .writeFailed:
+            runtimeBanners.insert(.storageError)
+            storageErrorExpiry?.cancel()
+            storageErrorExpiry = scheduler(clock().addingTimeInterval(Self.storageErrorDuration)) { [weak self] in
+                self?.removeRuntimeBanner(.storageError)
+            }
+        case .corrupt:
+            runtimeBanners.insert(.storageCorrupt)
+        }
+        updateBanners()
+    }
+
+    /// Only dismissible banners can be removed; launch banners never come back once dismissed.
+    public func dismiss(_ banner: Banner) {
+        guard banner.isDismissible else { return }
+        launchBanners.remove(banner)
+        removeRuntimeBanner(banner)
+    }
+
+    private func removeRuntimeBanner(_ banner: Banner) {
+        if banner == .storageError {
+            storageErrorExpiry?.cancel()
+            storageErrorExpiry = nil
+        }
+        runtimeBanners.remove(banner)
+        updateBanners()
+    }
+
+    private func updateBanners() {
+        let active = systemBanners.union(launchBanners).union(runtimeBanners)
+        banners = Banner.allCases.filter(active.contains)
     }
 
     // MARK: Delete / undo
@@ -275,6 +351,7 @@ import Observation
     // MARK: Observation
 
     private func queryOrFilterChanged() {
+        guard !suppressRestart else { return }
         limit = Self.pageSize
         startObservations(selectFirst: true)
     }
@@ -313,6 +390,10 @@ import Observation
         deletedIDs.formIntersection(fetched.map(\.id))
         onRowsEmitted?(fetched)
         applyRows()
+        if scrollToFirstOnNextRows {
+            scrollToFirstOnNextRows = false
+            scrollTarget = rows.first?.id
+        }
     }
 
     /// Selection rules: first row after a query/filter change (once rows exist); otherwise keep the
