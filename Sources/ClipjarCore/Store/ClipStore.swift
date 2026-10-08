@@ -10,8 +10,11 @@ public actor ClipStore {
     var limit: HistoryLimit = .l1000
     var maxAgeDays = 0
     private(set) var optimizeRunCount = 0
-    /// Set when deleted rows' bytes have not been scrubbed yet.
-    private(set) var scrubPending = false
+    /// Set when deleted rows' bytes have not been scrubbed yet; `.rebuild` once any pending scrub
+    /// came from `clearAll`.
+    private(set) var pendingScrub: FTSScrub?
+    var scrubPending: Bool { pendingScrub != nil }
+    private(set) var lastScrubCommand: FTSScrub?
     /// Set only by prune-driven scrubs; user deletions take no `now`.
     private var lastScrubAt: Date?
     /// Test seam: when set, every scrub throws this before touching the database.
@@ -67,6 +70,8 @@ public actor ClipStore {
         } catch {
             let e = error as NSError
             Log.store.error("prune after ingest failed: \(e.domain, privacy: .public) \(e.code, privacy: .public)")
+            // The clip is stored, but corruption must reach the caller so it can flag the store for repair.
+            if StoreErrorClassifier.isCorruption(error) { throw error }
         }
         return result
     }
@@ -151,27 +156,34 @@ extension ClipStore {
         }
         blobs.remove(deleted.blobNames)
         guard deleted.count > 0 else { return 0 }
-        scrubPending = true
+        markScrubPending(.optimize)
         if lastScrubAt.map({ now.timeIntervalSince($0) >= 3600 }) ?? true {
-            scrubAfterCommittedDelete(.optimize, at: now)
+            try scrubAfterCommittedDelete(.optimize, at: now)
         }
         return deleted.count
     }
 
-    /// The deletion already committed, so a scrub failure is logged and left pending rather than thrown.
-    private func scrubAfterCommittedDelete(_ command: FTSScrub, at now: Date?) {
+    /// The deletion already committed, so a scrub failure is logged and left pending rather than thrown,
+    /// except corruption, which is rethrown so the caller can classify it and flag the store for repair.
+    private func scrubAfterCommittedDelete(_ command: FTSScrub, at now: Date?) throws {
         do {
             try scrub(command, at: now)
         } catch {
-            scrubPending = true
+            markScrubPending(command)
             let e = error as NSError
             Log.store.error("scrub failed: \(e.domain, privacy: .public) \(e.code, privacy: .public)")
+            if StoreErrorClassifier.isCorruption(error) { throw error }
         }
     }
 
-    /// Completes a deferred prune scrub; called on app termination.
+    /// A pending `.rebuild` is never downgraded to `.optimize`.
+    private func markScrubPending(_ command: FTSScrub) {
+        if pendingScrub != .rebuild { pendingScrub = command }
+    }
+
+    /// Completes a deferred scrub; called on app termination.
     public func scrubIfPending() throws {
-        if scrubPending { try scrub(.optimize, at: nil) }
+        if let pendingScrub { try scrub(pendingScrub, at: nil) }
     }
 
     enum FTSScrub: String { case optimize, rebuild }
@@ -187,7 +199,8 @@ extension ClipStore {
             try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
         }
         optimizeRunCount += 1
-        scrubPending = false
+        lastScrubCommand = command
+        pendingScrub = nil
         if let now { lastScrubAt = now }
     }
 
@@ -282,7 +295,7 @@ extension ClipStore {
     private func deleteCommitted(where condition: SQL, scrub command: FTSScrub) throws -> Int {
         let deleted = try writer.write { db in try Self.deleteRows(db, where: condition) }
         blobs.remove(deleted.blobNames)
-        if deleted.count > 0 { scrubAfterCommittedDelete(command, at: nil) }
+        if deleted.count > 0 { try scrubAfterCommittedDelete(command, at: nil) }
         return deleted.count
     }
 }

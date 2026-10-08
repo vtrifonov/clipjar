@@ -111,6 +111,76 @@ import Testing
         #expect(!exists(support.appendingPathComponent(StoreOpener.repairFlagName)))
     }
 
+    /// A healthy on-disk store holding one clip, with the repair flag set.
+    private func flaggedStore(_ dir: TempDir) async throws -> URL {
+        let support = supportURL(dir)
+        let first = await StoreOpener.open(supportDirectory: support, now: now)
+        try await first.store.ingest(text("Hello, Clipjar"), source: nil, at: t0)
+        try first.store.close()
+        try createFlag(in: support)
+        return support
+    }
+
+    private func expectMovedAside(_ r: OpenResult, _ support: URL) throws {
+        #expect(r.recoveredFromCorruption)
+        #expect(r.ranRepairChecks)
+        #expect(!r.storageUnavailable)
+        #expect(exists(support.appendingPathComponent("clips.sqlite.corrupt-\(stamp)")))
+        #expect(!exists(support.appendingPathComponent(StoreOpener.repairFlagName)))
+    }
+
+    @Test func failingChecksMoveAside() async throws {
+        let dir = try TempDir()
+        let support = try await flaggedStore(dir)
+        let r = await StoreOpener.open(supportDirectory: support, now: now, repairChecks: { _ in false })
+        defer { try? r.store.close() }
+        try expectMovedAside(r, support)
+    }
+
+    @Test(arguments: [DatabaseError.SQLITE_CORRUPT, .SQLITE_NOTADB, .SQLITE_CONSTRAINT])
+    func checkErrorMovesAside(_ code: ResultCode) async throws {
+        let dir = try TempDir()
+        let support = try await flaggedStore(dir)
+        let r = await StoreOpener.open(
+            supportDirectory: support, now: now, repairChecks: { _ in throw DatabaseError(resultCode: code) }
+        )
+        defer { try? r.store.close() }
+        try expectMovedAside(r, support)
+    }
+
+    @Test(arguments: [DatabaseError.SQLITE_FULL, .SQLITE_IOERR, .SQLITE_BUSY, .SQLITE_NOMEM, .SQLITE_CANTOPEN])
+    func transientCheckErrorKeepsFlagAndUsesMemory(_ code: ResultCode) async throws {
+        let dir = try TempDir()
+        let support = try await flaggedStore(dir)
+        let r = await StoreOpener.open(
+            supportDirectory: support, now: now, repairChecks: { _ in throw DatabaseError(resultCode: code) }
+        )
+        #expect(r.storageUnavailable)
+        #expect(!r.recoveredFromCorruption)
+        #expect(exists(support.appendingPathComponent(StoreOpener.repairFlagName)))
+        #expect(exists(support.appendingPathComponent("clips.sqlite")))
+        let names = try FileManager.default.contentsOfDirectory(atPath: support.path)
+        #expect(!names.contains { $0.contains(".corrupt-") })
+    }
+
+    @Test(arguments: ["clips.sqlite-wal", "clips.sqlite-shm", "blobs"])
+    func failedRenameRollsBackMoveAside(_ failing: String) throws {
+        let dir = try TempDir()
+        let support = supportURL(dir)
+        try writeGarbageStore(at: support)
+        #expect(throws: CocoaError.self) {
+            try StoreOpener.moveAside(support, now: now) { source, target in
+                if source.lastPathComponent == failing { throw CocoaError(.fileWriteNoPermission) }
+                try FileManager.default.moveItem(at: source, to: target)
+            }
+        }
+        for name in ["clips.sqlite", "clips.sqlite-wal", "clips.sqlite-shm", "blobs/x.png"] {
+            #expect(exists(support.appendingPathComponent(name)), "\(name) restored")
+        }
+        let names = try FileManager.default.contentsOfDirectory(atPath: support.path)
+        #expect(!names.contains { $0.contains(".corrupt-") })
+    }
+
     @Test func noFlagSkipsChecks() async throws {
         let dir = try TempDir()
         let support = supportURL(dir)

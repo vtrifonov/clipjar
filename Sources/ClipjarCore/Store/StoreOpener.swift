@@ -26,6 +26,13 @@ public enum StoreOpener {
     /// A corrupt database (at open, or failing the checks run when the repair flag exists) is moved aside
     /// and replaced with a fresh one. Any other failure falls back to `openInMemory()`.
     public static func open(supportDirectory: URL, now: Date = Date()) async -> OpenResult {
+        await open(supportDirectory: supportDirectory, now: now, repairChecks: runRepairChecks)
+    }
+
+    /// Test seam for the repair checks.
+    static func open(
+        supportDirectory: URL, now: Date, repairChecks: (any DatabaseWriter) throws -> Bool
+    ) async -> OpenResult {
         let store: ClipStore
         do {
             try prepareLayout(supportDirectory)
@@ -46,7 +53,7 @@ public enum StoreOpener {
             )
         }
         do {
-            if try runRepairChecks(store.writer) {
+            if try repairChecks(store.writer) {
                 removeRepairFlag(in: supportDirectory)
                 return OpenResult(
                     store: store, recoveredFromCorruption: false, storageUnavailable: false,
@@ -54,12 +61,14 @@ public enum StoreOpener {
                 )
             }
             Log.store.error("integrity check failed")
-        } catch where isCorruptDatabase(error) {
-            logFailure("repair checks found corruption", error)
-        } catch {
+        } catch where isTransientFailure(error) {
+            // The flag stays, so the checks run again at the next launch.
             logFailure("repair checks failed", error)
             try? store.close()
             return openInMemory()
+        } catch {
+            // Corruption, or a check the database itself fails (e.g. a UNIQUE violation from REINDEX).
+            logFailure("repair checks found damage", error)
         }
         do {
             try store.close()
@@ -93,8 +102,9 @@ public enum StoreOpener {
         )
     }
 
-    /// Support dir and `blobs/` are 0700 and the support dir is excluded from backup, re-applied on every
-    /// launch; a missing database file is created empty with 0600 before the pool opens it.
+    /// Support dir and `blobs/` are 0700, existing db/`-wal`/`-shm` files 0600, and the support dir is
+    /// excluded from backup, all re-applied on every launch; a missing database file is created empty
+    /// with 0600 before the pool opens it. A backup-exclusion failure is logged, not fatal.
     static func prepareLayout(_ supportDirectory: URL) throws {
         let fm = FileManager.default
         let blobsURL = supportDirectory.appendingPathComponent(blobsName, isDirectory: true)
@@ -108,10 +118,17 @@ public enum StoreOpener {
                 throw CocoaError(.fileWriteUnknown)
             }
         }
+        for path in [dbPath, dbPath + "-wal", dbPath + "-shm"] where fm.fileExists(atPath: path) {
+            try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+        }
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         var url = supportDirectory
-        try url.setResourceValues(values)
+        do {
+            try url.setResourceValues(values)
+        } catch {
+            logFailure("backup exclusion failed", error)
+        }
     }
 
     /// Opens the pool and runs the migrator; the pool is closed if the store can't be built.
@@ -133,6 +150,17 @@ public enum StoreOpener {
     static func isCorruptDatabase(_ error: any Error) -> Bool {
         guard let code = (error as? DatabaseError)?.resultCode else { return false }
         return code == .SQLITE_CORRUPT || code == .SQLITE_NOTADB
+    }
+
+    /// Resource or environment failures that say nothing about the database's health; any other
+    /// SQLite error counts as damage. Non-SQLite errors are treated as transient.
+    static func isTransientFailure(_ error: any Error) -> Bool {
+        guard let code = (error as? DatabaseError)?.resultCode else { return true }
+        let transient: [ResultCode] = [
+            .SQLITE_FULL, .SQLITE_IOERR, .SQLITE_BUSY, .SQLITE_LOCKED, .SQLITE_NOMEM, .SQLITE_CANTOPEN,
+            .SQLITE_READONLY, .SQLITE_PERM, .SQLITE_AUTH, .SQLITE_INTERRUPT, .SQLITE_ABORT,
+        ]
+        return transient.contains(code)
     }
 
     /// FTS integrity check against the content table (rebuild on failure), REINDEX, then
@@ -171,7 +199,12 @@ public enum StoreOpener {
 
     /// Renames `clips.sqlite` (+ `-wal`/`-shm`) to `clips.sqlite.corrupt-<stamp><suffix>` and `blobs/` to
     /// `blobs.corrupt-<stamp><suffix>`, with the first suffix ("", "-2", "-3", …) free for both.
-    static func moveAside(_ supportDirectory: URL, now: Date) throws {
+    /// All or nothing: if any rename fails, the ones already done are renamed back before rethrowing,
+    /// so the database is never split from its `-wal` or `blobs/`. `rename` is a test seam.
+    static func moveAside(
+        _ supportDirectory: URL, now: Date,
+        rename: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }
+    ) throws {
         let fm = FileManager.default
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -189,15 +222,26 @@ public enum StoreOpener {
             n += 1
         } while fm.fileExists(atPath: dbTarget) || fm.fileExists(atPath: blobsTarget.path)
 
-        for ext in ["", "-wal", "-shm"] {
-            let source = supportDirectory.appendingPathComponent(databaseName + ext)
-            if fm.fileExists(atPath: source.path) {
-                try fm.moveItem(at: source, to: URL(fileURLWithPath: dbTarget + ext))
-            }
+        var moves = ["", "-wal", "-shm"].map { ext in
+            (supportDirectory.appendingPathComponent(databaseName + ext), URL(fileURLWithPath: dbTarget + ext))
         }
-        let blobs = supportDirectory.appendingPathComponent(blobsName, isDirectory: true)
-        if fm.fileExists(atPath: blobs.path) {
-            try fm.moveItem(at: blobs, to: blobsTarget)
+        moves.append((supportDirectory.appendingPathComponent(blobsName, isDirectory: true), blobsTarget))
+
+        var done: [(source: URL, target: URL)] = []
+        do {
+            for (source, target) in moves where fm.fileExists(atPath: source.path) {
+                try rename(source, target)
+                done.append((source, target))
+            }
+        } catch {
+            for (source, target) in done.reversed() {
+                do {
+                    try rename(target, source)
+                } catch {
+                    logFailure("move-aside rollback failed", error)
+                }
+            }
+            throw error
         }
     }
 

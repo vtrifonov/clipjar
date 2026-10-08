@@ -45,11 +45,20 @@ import Testing
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: support.appendingPathComponent("blobs").path
         )
+        let db = support.appendingPathComponent("clips.sqlite")
+        let wal = support.appendingPathComponent("clips.sqlite-wal")
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: db.path)
+        if !FileManager.default.fileExists(atPath: wal.path) {
+            FileManager.default.createFile(atPath: wal.path, contents: nil)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: wal.path)
         let second = await StoreOpener.open(supportDirectory: support)
         defer { try? second.store.close() }
         #expect(!second.storageUnavailable)
         #expect(try posixPermissions(support) == 0o700)
         #expect(try posixPermissions(support.appendingPathComponent("blobs")) == 0o700)
+        #expect(try posixPermissions(db) == 0o600)
+        #expect(try posixPermissions(wal) == 0o600)
     }
 
     @Test func healthyReopenKeepsData() async throws {

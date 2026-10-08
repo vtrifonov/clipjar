@@ -113,6 +113,52 @@ import Testing
     }
 
     @Test(arguments: Backend.allCases)
+    func userDeleteScrubCorruptionIsThrown(_ backend: Backend) async throws {
+        let fx = try makeStore(backend)
+        let clipID = id(of: try await fx.store.ingest(text("Hello, Clipjar"), source: nil, at: t0))
+        await fx.store.setScrubFaultForTesting(DatabaseError(resultCode: .SQLITE_CORRUPT_VTAB))
+        await #expect {
+            try await fx.store.delete(id: clipID)
+        } throws: { error in
+            StoreErrorClassifier.classify(error, supportDirectory: fx.dir.url) == .corrupt
+        }
+        #expect(FileManager.default.fileExists(atPath: fx.dir.url.appendingPathComponent(StoreOpener.repairFlagName).path))
+        #expect(try await fx.store.clip(id: clipID) == nil)
+        #expect(await fx.store.scrubPending == true)
+    }
+
+    @Test(arguments: Backend.allCases)
+    func pruneScrubCorruptionReachesIngestCaller(_ backend: Backend) async throws {
+        let fx = try makeStore(backend)
+        await fx.store.configure(limit: .l200, maxAgeDays: 0)
+        try seed(fx.writer, olderItems(200))
+        await fx.store.setScrubFaultForTesting(DatabaseError(resultCode: .SQLITE_CORRUPT))
+        await #expect {
+            try await fx.store.ingest(text("New item"), source: nil, at: t0)
+        } throws: { StoreErrorClassifier.isCorruption($0) }
+        #expect(try await fx.writer.read { try ClipQuery(terms: ["new item"]).fetchCount($0) } == 1)
+        #expect(try clipCount(fx.writer) == 200)
+    }
+
+    @Test(arguments: Backend.allCases)
+    func failedClearAllScrubRetriesWithRebuild(_ backend: Backend) async throws {
+        let fx = try makeStore(backend)
+        await fx.store.configure(limit: .l200, maxAgeDays: 0)
+        try await fx.store.ingest(text("Hello, Clipjar"), source: nil, at: t0)
+        await fx.store.setScrubFaultForTesting(CocoaError(.fileWriteUnknown))
+        #expect(try await fx.store.clearAll(keepPinned: true) == 1)
+        #expect(await fx.store.pendingScrub == .rebuild)
+        // A later prune-driven pending scrub never downgrades the pending rebuild.
+        try seed(fx.writer, olderItems(201))
+        try await fx.store.ingest(text("New item"), source: nil, at: t0 + 1)
+        #expect(await fx.store.pendingScrub == .rebuild)
+        await fx.store.setScrubFaultForTesting(nil)
+        try await fx.store.scrubIfPending()
+        #expect(await fx.store.lastScrubCommand == .rebuild)
+        #expect(await fx.store.pendingScrub == nil)
+    }
+
+    @Test(arguments: Backend.allCases)
     func hourlyScrubRuns(_ backend: Backend) async throws {
         let fx = try makeStore(backend)
         await fx.store.configure(limit: .l200, maxAgeDays: 0)
