@@ -37,3 +37,41 @@ func posixPermissions(_ url: URL) throws -> Int {
 
 /// Whole seconds: GRDB stores Dates with millisecond precision.
 let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+
+struct StoreFixture {
+    let store: ClipStore
+    let writer: any DatabaseWriter
+    let dir: TempDir
+    var blobsURL: URL
+}
+
+/// Blobs directory is `dir/blobs`, created 0700.
+func makeStore(_ backend: Backend, thumbnailer: (@Sendable (Data) -> Data?)? = nil) throws -> StoreFixture {
+    let dir = try TempDir()
+    let writer = try makeWriter(backend, in: dir)
+    let blobsURL = dir.url.appendingPathComponent("blobs", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: blobsURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+    )
+    let store = if let thumbnailer {
+        try ClipStore(writer: writer, blobsDirectory: blobsURL, thumbnailer: thumbnailer)
+    } else {
+        try ClipStore(writer: writer, blobsDirectory: blobsURL)
+    }
+    return StoreFixture(store: store, writer: writer, dir: dir, blobsURL: blobsURL)
+}
+
+func text(_ s: String, kind: ClipKind = .text, rtf: Data? = nil, html: Data? = nil) -> CapturedContent {
+    CapturedContent(kind: kind, plainText: s, rtf: rtf, html: html)
+}
+
+let textEdit = SourceApp(bundleID: "com.apple.TextEdit", name: "TextEdit")
+let safari = SourceApp(bundleID: "com.apple.Safari", name: "Safari")
+
+func fetchClip(_ w: any DatabaseWriter, _ id: Int64) throws -> Clip? {
+    try w.read { try Clip.fetchOne($0, key: id) }
+}
+
+func clipCount(_ w: any DatabaseWriter) throws -> Int {
+    try w.read { try Clip.fetchCount($0) }
+}
