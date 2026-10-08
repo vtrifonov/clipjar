@@ -14,6 +14,8 @@ import Foundation
     var totalDataReads: Int { reads.values.reduce(0, +) }
     private(set) var written: [ClipPayload] = []
     var onWrite: (() -> Void)?
+    /// Runs at the start of every counted content read, before the value is returned.
+    var onContentRead: (() -> Void)?
 
     /// Replaces the contents and bumps `changeCount`; does not reset `reads`.
     func copy(
@@ -37,16 +39,19 @@ import Foundation
 
     func fileURLs() -> [URL] {
         reads[PasteboardTypes.fileURL, default: 0] += 1
+        onContentRead?()
         return urls
     }
 
     func string() -> String? {
         reads[PasteboardTypes.string, default: 0] += 1
+        onContentRead?()
         return stringValue
     }
 
     func data(forType type: String) -> Data? {
         reads[type, default: 0] += 1
+        onContentRead?()
         return dataByType[type]
     }
 

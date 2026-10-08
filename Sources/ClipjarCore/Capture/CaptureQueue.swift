@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public struct CaptureItem: Sendable {
     public var content: CapturedContent
@@ -17,6 +18,7 @@ public struct CaptureItem: Sendable {
 public final class CaptureQueue: Sendable {
     private let stream: AsyncStream<CaptureItem>
     private let continuation: AsyncStream<CaptureItem>.Continuation
+    private let started = OSAllocatedUnfairLock(initialState: false)
 
     public init() {
         (stream, continuation) = AsyncStream.makeStream(of: CaptureItem.self, bufferingPolicy: .unbounded)
@@ -31,12 +33,21 @@ public final class CaptureQueue: Sendable {
     }
 
     /// Single long-lived consumer; call once. Ingests sequentially in yield order; an ingest error
-    /// is reported through `onEvent` and never stops the loop.
+    /// is reported through `onEvent` and never stops the loop. Later calls are logged and return a
+    /// task that does nothing, since an AsyncStream supports only one iterator.
     public func startConsuming(
         store: ClipStore,
         supportDirectory: URL?,
         onEvent: @escaping @MainActor @Sendable (StoreEvent) -> Void
     ) -> Task<Void, Never> {
+        let alreadyStarted = started.withLock { started in
+            defer { started = true }
+            return started
+        }
+        guard !alreadyStarted else {
+            Log.store.fault("capture queue consumer started twice")
+            return Task {}
+        }
         let stream = stream
         return Task {
             for await item in stream {

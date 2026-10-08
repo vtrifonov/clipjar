@@ -45,6 +45,8 @@ import Foundation
     /// Polls immediately, then every `interval`.
     public func start(interval: Duration = .milliseconds(300)) {
         task?.cancel()
+        // Activations seen while stopped are stale.
+        activatedSinceTick = []
         task = Task { [weak self] in
             while !Task.isCancelled {
                 self?.poll()
@@ -56,6 +58,7 @@ import Foundation
     public func stop() {
         task?.cancel()
         task = nil
+        activatedSinceTick = []
     }
 
     public func appActivated(_ app: SourceApp) {
@@ -95,6 +98,12 @@ import Foundation
             return
         case .empty:
             Log.capture.info("capture skipped: empty")
+            return
+        }
+        // A newer copy may have replaced the preflighted one during the read; drop what was read
+        // so the next tick preflights the new copy.
+        guard pasteboard.changeCount == cc else {
+            Log.capture.info("capture skipped: changed during read")
             return
         }
         guard let content = ClipExtractor.extract(snapshot) else { return }
