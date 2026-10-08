@@ -4,7 +4,8 @@ import Testing
 @testable import ClipjarCore
 
 @MainActor @Suite struct RetentionChangerTests {
-    private let defaults = UserDefaults(suiteName: "clipjar-tests-\(UUID().uuidString)")!
+    private let tempDefaults = TempDefaults()
+    private var defaults: UserDefaults { tempDefaults.defaults }
     private let fx: StoreFixture
     private let settings: SettingsStore
     private let changer: RetentionChanger
@@ -12,7 +13,7 @@ import Testing
     init() throws {
         fx = try makeStore(.memoryQueue)
         let scheduler = FakeScheduler()
-        settings = SettingsStore(defaults: defaults, clock: { t0 }, scheduler: { scheduler.schedule($0, $1) })
+        settings = SettingsStore(defaults: tempDefaults.defaults, clock: { t0 }, scheduler: { scheduler.schedule($0, $1) })
         changer = RetentionChanger(store: fx.store, settings: settings, clock: { t0 })
     }
 

@@ -5,7 +5,8 @@ import Testing
 @testable import ClipjarCore
 
 @MainActor @Suite struct SettingsStoreTests {
-    private let defaults = UserDefaults(suiteName: "clipjar-tests-\(UUID().uuidString)")!
+    private let tempDefaults = TempDefaults()
+    private var defaults: UserDefaults { tempDefaults.defaults }
     private let scheduler = FakeScheduler()
 
     private func makeSettings(now: Date = t0) -> SettingsStore {

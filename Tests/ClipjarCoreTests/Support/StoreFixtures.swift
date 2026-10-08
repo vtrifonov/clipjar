@@ -18,6 +18,24 @@ final class TempDir: Sendable {
     }
 }
 
+/// A UserDefaults suite backed by a plist inside a temp directory (an absolute-path suite name), so
+/// nothing lands in ~/Library/Preferences; the domain is cleared and the directory removed on release.
+final class TempDefaults {
+    private let dir: TempDir
+    let name: String
+    let defaults: UserDefaults
+
+    init() {
+        dir = try! TempDir()
+        name = dir.url.appendingPathComponent("defaults").path
+        defaults = UserDefaults(suiteName: name)!
+    }
+
+    deinit {
+        defaults.removePersistentDomain(forName: name)
+    }
+}
+
 func makeWriter(_ backend: Backend, in dir: TempDir) throws -> any DatabaseWriter {
     switch backend {
     case .memoryQueue:
