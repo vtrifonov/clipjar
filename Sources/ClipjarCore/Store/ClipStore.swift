@@ -174,3 +174,58 @@ extension ClipStore {
         return (db.changesCount, names)
     }
 }
+
+extension ClipStore {
+    public func touch(id: Int64, at now: Date) throws {
+        try writer.write { db in
+            try db.execute(literal: "UPDATE clip SET lastCopiedAt = \(now) WHERE id = \(id)")
+        }
+    }
+
+    public func setPinned(id: Int64, _ pinned: Bool) throws {
+        try writer.write { db in
+            try db.execute(literal: "UPDATE clip SET isPinned = \(pinned) WHERE id = \(id)")
+        }
+    }
+
+    public func delete(id: Int64) throws {
+        try deleteCommitted(where: "id = \(id)")
+    }
+
+    /// Deletes only if the clip was not re-copied since `ifLastCopiedAt`; true iff a row was deleted.
+    @discardableResult
+    public func delete(id: Int64, ifLastCopiedAt: Date) throws -> Bool {
+        try deleteCommitted(where: "id = \(id) AND lastCopiedAt = \(ifLastCopiedAt)") > 0
+    }
+
+    /// Deletes every unpinned clip, or every clip when `keepPinned` is false.
+    @discardableResult
+    public func clearAll(keepPinned: Bool) throws -> Int {
+        try deleteCommitted(where: keepPinned ? "isPinned = 0" : "1")
+    }
+
+    /// nil for an unknown id, or for an image whose blob file is missing.
+    public func payload(id: Int64) throws -> ClipPayload? {
+        guard let clip = try clip(id: id) else { return nil }
+        switch clip.kind {
+        case .text, .link:
+            return .text(plain: clip.plainText, rtf: clip.rtfData, html: clip.htmlData)
+        case .image:
+            guard let path = clip.imagePath, let uti = clip.imageType, let data = blobs.read(path) else { return nil }
+            return .image(ImageData(data: data, uti: uti))
+        case .file:
+            return .files(clip.fileURLs.compactMap(URL.init(string:)))
+        }
+    }
+
+    public func clip(id: Int64) throws -> Clip? {
+        try reader.read { try Clip.fetchOne($0, key: id) }
+    }
+
+    /// Deletes rows in one transaction and removes their blob files after it commits.
+    private func deleteCommitted(where condition: SQL) throws -> Int {
+        let deleted = try writer.write { db in try Self.deleteRows(db, where: condition) }
+        blobs.remove(deleted.blobNames)
+        return deleted.count
+    }
+}
