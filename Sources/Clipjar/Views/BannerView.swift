@@ -2,10 +2,12 @@ import AppKit
 import ClipjarCore
 import SwiftUI
 
-/// A one-line warning under the header, with the action that resolves it.
+/// A warning under the header (at most two lines), with the action that resolves it.
 struct BannerView: View {
     let banner: Banner
     let onDismiss: () -> Void
+    /// Closes the panel before an action brings another app forward.
+    let onLeave: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -14,8 +16,8 @@ struct BannerView: View {
                 .accessibilityHidden(true)
             Text(message)
                 .font(.callout)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
                 .help(message)
             Spacer(minLength: 4)
             action
@@ -33,7 +35,8 @@ struct BannerView: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(height: 36)
+        .padding(.vertical, 6)
+        .frame(minHeight: 36)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.yellow.opacity(0.15)))
         .padding(.horizontal, 8)
         .accessibilityElement(children: .contain)
@@ -62,15 +65,20 @@ struct BannerView: View {
         switch banner {
         case .accessibility:
             Button("Open Settings") {
+                onLeave()
                 SystemSettingsLinks.openAccessibility()
                 BannerActions.promptForAccessibilityOnce()
             }
             .controlSize(.small)
         case .pasteboardDenied:
-            Button("Open Settings") { SystemSettingsLinks.open(SystemSettingsLinks.privacy) }
-                .controlSize(.small)
+            Button("Open Settings") {
+                onLeave()
+                SystemSettingsLinks.open(SystemSettingsLinks.privacy)
+            }
+            .controlSize(.small)
         case .recoveredFromCorruption:
             Button("Show in Finder") {
+                onLeave()
                 guard let dir = try? StoreOpener.defaultSupportDirectory() else { return }
                 NSWorkspace.shared.activateFileViewerSelecting([dir])
             }

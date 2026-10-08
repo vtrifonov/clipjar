@@ -26,7 +26,13 @@ struct ToastView: View {
         .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
         .accessibilityElement(children: .contain)
-        .onAppear { AccessibilityNotification.Announcement(announcement).post() }
+        .onAppear(perform: announce)
+        // A second delete replaces the toast in place, without a new appearance.
+        .onChange(of: toast) { announce() }
+    }
+
+    private func announce() {
+        AccessibilityNotification.Announcement(announcement).post()
     }
 
     private var announcement: String {

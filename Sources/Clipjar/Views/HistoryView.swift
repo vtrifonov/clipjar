@@ -18,7 +18,11 @@ struct HistoryView: View {
             if !model.banners.isEmpty {
                 VStack(spacing: 6) {
                     ForEach(model.banners, id: \.self) { banner in
-                        BannerView(banner: banner) { model.dismiss(banner) }
+                        BannerView(
+                            banner: banner,
+                            onDismiss: { model.dismiss(banner) },
+                            onLeave: { model.handle(.close) }
+                        )
                     }
                 }
                 .padding(.top, 8)

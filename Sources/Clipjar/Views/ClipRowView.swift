@@ -19,10 +19,13 @@ struct ClipListView: View {
                     }
                     .padding(6)
                     .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.9), value: model.selectedID)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Clips")
                 }
                 .onChange(of: model.scrollRequest) { _, request in
                     guard let request else { return }
                     proxy.scrollTo(request.id, anchor: nil)
+                    announceSelection(request.id)
                 }
             }
         }
@@ -60,6 +63,12 @@ struct ClipListView: View {
         .accessibilityAction(named: row.isPinned ? "Unpin" : "Pin") { perform(.togglePin, on: row) }
         .accessibilityAction(named: "Delete") { perform(.delete, on: row) }
         .accessibilityAction(named: "Copy") { perform(.activate(copyOnly: true), on: row) }
+    }
+
+    /// Keyboard moves keep VoiceOver focus in the search field, so the newly selected clip is read out.
+    private func announceSelection(_ id: Int64) {
+        guard NSWorkspace.shared.isVoiceOverEnabled, let row = model.rows.first(where: { $0.id == id }) else { return }
+        AccessibilityNotification.Announcement(DisplayFormat.rowAccessibilityLabel(row, now: Date())).post()
     }
 
     private func perform(_ cmd: PanelCommand, on row: ClipRow) {
@@ -184,7 +193,8 @@ struct ClipRowView: View {
                     .strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5)
             )
             .frame(width: 12, height: 12)
-            .accessibilityLabel("Colour \(Self.hex(color))")
+            // The row's own label names the colour; its children are hidden from VoiceOver.
+            .accessibilityHidden(true)
     }
 
     private var pill: some View {
@@ -232,9 +242,5 @@ struct ClipRowView: View {
             attributed[range].foregroundColor = .accentColor
         }
         return attributed
-    }
-
-    static func hex(_ c: TextHeuristics.RGBA) -> String {
-        String(format: "#%02X%02X%02X", Int((c.r * 255).rounded()), Int((c.g * 255).rounded()), Int((c.b * 255).rounded()))
     }
 }

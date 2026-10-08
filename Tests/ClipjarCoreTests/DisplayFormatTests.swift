@@ -105,6 +105,18 @@ import Testing
         #expect(files == "Files, /tmp/a.txt, now")
     }
 
+    @Test func rowAccessibilityLabelNamesHexColour() {
+        let label = DisplayFormat.rowAccessibilityLabel(row("#f80"), now: t0, locale: us)
+        #expect(label == "Text, #f80, colour #FF8800, from TextEdit, now")
+        let link = DisplayFormat.rowAccessibilityLabel(row("https://example.com/docs", kind: .link), now: t0, locale: us)
+        #expect(!link.contains("colour"))
+    }
+
+    @Test func colourHex() {
+        #expect(DisplayFormat.colourHex(TextHeuristics.RGBA(r: 1, g: 136.0 / 255, b: 0, a: 1)) == "#FF8800")
+        #expect(DisplayFormat.colourHex(TextHeuristics.RGBA(r: 0, g: 0, b: 0, a: 0.5)) == "#000000")
+    }
+
     @Test func bytes() {
         #expect(DisplayFormat.bytes(245_000) == "245 KB")
     }

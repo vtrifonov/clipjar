@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var bufferedEvents: [StoreEvent] = []
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var captureActivity: NSObjectProtocol?
+    /// The last other app the user was in; focus goes back to it when Clipjar steps aside.
+    private var focus = FocusTracker(ownPID: ProcessInfo.processInfo.processIdentifier)
 
     // MARK: Launch
 
@@ -80,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         hotkey = HotkeyController { [weak self] in self?.requestOpen(.cursor, toggle: true) }
         installObservers()
+        if let front = NSWorkspace.shared.frontmostApplication { _ = focus.appActivated(SourceAppHandle(front)) }
         trackCaptureActivity()
 
         // 6–7. Open the store, start ingesting, then build the panel and replay any queued open.
@@ -138,7 +141,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             model: model,
             settings: settings,
             paster: paster,
-            statusButtonFrame: { [weak self] in self?.statusItem?.buttonScreenFrame }
+            statusButtonFrame: { [weak self] in self?.statusItem?.buttonScreenFrame },
+            restoreFocus: { [weak self] in self?.restoreFocus() }
         )
         model.setLaunchBanners(recovered: result.recoveredFromCorruption, storageUnavailable: result.storageUnavailable)
         for event in bufferedEvents { model.report(event) }
@@ -155,7 +159,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             let source = SourceApp(bundleID: app?.bundleIdentifier, name: app?.localizedName)
-            MainActor.assumeIsolated { self?.watcher?.appActivated(source) }
+            let handle = app.map(SourceAppHandle.init)
+            MainActor.assumeIsolated { self?.appActivated(source, handle: handle) }
         }
         let woke = workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) {
             [weak self] _ in
@@ -168,6 +173,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.requestOpen(.centred) }
         }
         observers = [(workspace, activated), (workspace, woke), (distributed, show)]
+    }
+
+    /// Another app coming forward (⌘Tab, a click elsewhere, a link the panel opened) closes the panel.
+    /// Paster activates the target only after the panel has closed, so a paste never lands here first.
+    private func appActivated(_ source: SourceApp, handle: SourceAppHandle?) {
+        watcher?.appActivated(source)
+        if let handle, focus.appActivated(handle) { panel?.hide() }
+    }
+
+    /// Gives focus back to the last other app, unless the user is in the Settings window.
+    private func restoreFocus() {
+        guard settingsWindow?.isVisible != true, let app = focus.lastExternalApp else { return }
+        _ = SystemAppActivator().activate(app)
     }
 
     private func pruneNow() {
@@ -236,10 +254,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if settingsWindow == nil {
             settingsWindow = SettingsWindowController(
-                settings: settings, store: store, retention: RetentionChanger(store: store, settings: settings)
+                settings: settings, store: store, retention: RetentionChanger(store: store, settings: settings),
+                onClose: { [weak self] in self?.settingsClosed() }
             )
         }
         settingsWindow?.show()
+    }
+
+    /// A windowless accessory app would otherwise stay active with nothing to type into.
+    private func settingsClosed() {
+        guard panel?.isVisible != true, let app = focus.lastExternalApp else { return }
+        _ = SystemAppActivator().activate(app)
     }
 
     // MARK: Lifecycle

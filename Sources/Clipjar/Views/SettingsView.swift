@@ -176,12 +176,15 @@ private struct HistorySection: View {
         }
         .onChange(of: limit) { propose() }
         .onChange(of: maxAgeDays) { propose() }
+        // SwiftUI clears the presentation binding before running a button's action, so the buttons get the
+        // change from `presenting:` and only Cancel (also Esc) reverts the pickers.
         .confirmationDialog(
             "Remove \((pending?.removing ?? 0).formatted()) older clips? Pinned clips are kept.",
-            isPresented: Binding(get: { pending != nil }, set: { if !$0 { cancelPending() } })
-        ) {
-            Button("Remove", role: .destructive) { applyPending() }
-            Button("Cancel", role: .cancel) { cancelPending() }
+            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+            presenting: pending
+        ) { change in
+            Button("Remove", role: .destructive) { apply(change) }
+            Button("Cancel", role: .cancel) { revert() }
         }
         .confirmationDialog("Clear all unpinned clips? This can't be undone.", isPresented: $confirmingClear) {
             Button("Clear History", role: .destructive) { clearHistory() }
@@ -206,24 +209,16 @@ private struct HistorySection: View {
         }
     }
 
-    private func applyPending() {
-        guard let p = pending else { return }
+    private func apply(_ change: Pending) {
         pending = nil
         Task {
             do {
-                try await retention.apply(limit: p.limit, maxAgeDays: p.maxAgeDays)
+                try await retention.apply(limit: change.limit, maxAgeDays: change.maxAgeDays)
             } catch {
                 logFailure("retention apply failed", error)
                 revert()
             }
         }
-    }
-
-    /// The dialog's binding also lands here after Remove, when nothing is pending any more.
-    private func cancelPending() {
-        guard pending != nil else { return }
-        pending = nil
-        revert()
     }
 
     private func revert() {
@@ -267,15 +262,20 @@ private struct PrivacySection: View {
         }
 
         Section {
-            if settings.ignoredBundleIDs.isEmpty {
-                Text("No ignored apps")
-                    .foregroundStyle(.secondary)
+            // A real List: focusable, arrow keys move the selection, ⌫ removes it, and VoiceOver sees it.
+            List(settings.ignoredBundleIDs, id: \.self, selection: $selection) { id in
+                IgnoredAppRow(bundleID: id)
+                    .accessibilityAction(named: "Stop ignoring") { remove(id) }
             }
-            ForEach(settings.ignoredBundleIDs, id: \.self) { id in
-                IgnoredAppRow(bundleID: id, isSelected: selection == id)
-                    .contentShape(Rectangle())
-                    .onTapGesture { selection = selection == id ? nil : id }
+            .listStyle(.bordered(alternatesRowBackgrounds: true))
+            .frame(height: 150)
+            .overlay {
+                if settings.ignoredBundleIDs.isEmpty {
+                    Text("No ignored apps").foregroundStyle(.secondary)
+                }
             }
+            .onDeleteCommand(perform: removeSelected)
+            .accessibilityLabel("Ignored apps")
             HStack(spacing: 0) {
                 Button(action: addApps) {
                     Image(systemName: "plus").frame(width: 22, height: 18)
@@ -300,9 +300,12 @@ private struct PrivacySection: View {
     }
 
     private func removeSelected() {
-        guard let selection else { return }
-        settings.ignoredBundleIDs.removeAll { $0 == selection }
-        self.selection = nil
+        if let selection { remove(selection) }
+    }
+
+    private func remove(_ id: String) {
+        settings.ignoredBundleIDs.removeAll { $0 == id }
+        if selection == id { selection = nil }
     }
 
     private func addApps() {
@@ -324,7 +327,6 @@ private struct PrivacySection: View {
 
 private struct IgnoredAppRow: View {
     let bundleID: String
-    let isSelected: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -344,13 +346,7 @@ private struct IgnoredAppRow: View {
             Spacer()
         }
         .padding(.vertical, 2)
-        .padding(.horizontal, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.22) : .clear)
-        )
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var displayName: String {

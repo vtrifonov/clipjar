@@ -20,9 +20,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let settings: SettingsStore
     private let paster: Paster
     private let statusButtonFrame: () -> NSRect?
+    private let restoreFocus: () -> Void
     private let panel: ClipjarPanel
 
-    /// The app that was frontmost when the panel opened; paste goes back to it.
+    /// The app that was frontmost when the panel opened; paste goes back to it. nil when that was Clipjar.
     private var target: SourceAppHandle?
     private var isShown = false
     private var isHidingImmediately = false
@@ -35,12 +36,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         model: HistoryViewModel,
         settings: SettingsStore,
         paster: Paster,
-        statusButtonFrame: @escaping () -> NSRect?
+        statusButtonFrame: @escaping () -> NSRect?,
+        restoreFocus: @escaping () -> Void
     ) {
         self.model = model
         self.settings = settings
         self.paster = paster
         self.statusButtonFrame = statusButtonFrame
+        self.restoreFocus = restoreFocus
         panel = ClipjarPanel(
             contentRect: NSRect(origin: .zero, size: PanelPlacement.size),
             styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
@@ -75,9 +78,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func show(_ placement: OpenPlacement) {
-        if let app = NSWorkspace.shared.frontmostApplication, app.bundleIdentifier != AppIdentity.bundleID {
-            target = SourceAppHandle(app)
-        }
+        target = FocusTracker.pasteTarget(
+            frontmost: NSWorkspace.shared.frontmostApplication.map(SourceAppHandle.init),
+            ownPID: ProcessInfo.processInfo.processIdentifier
+        )
         let frame = frame(for: placement)
         showGeneration += 1
         isShown = true
@@ -105,7 +109,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Fades out; reactivates the target app if Clipjar became active meanwhile (e.g. Settings was opened).
+    /// Fades out. If Clipjar is the active app, focus goes back to the target, or to the last other app when
+    /// the panel opened with no target (e.g. after a Finder reopen).
     func hide() {
         guard isShown else { return }
         isShown = false
@@ -122,8 +127,11 @@ final class PanelController: NSObject, NSWindowDelegate {
                 MainActor.assumeIsolated { self?.finishHide(generation) }
             }
         }
-        if NSApp.isActive, let target {
+        guard NSApp.isActive else { return }
+        if let target {
             _ = SystemAppActivator().activate(target)
+        } else {
+            restoreFocus()
         }
     }
 

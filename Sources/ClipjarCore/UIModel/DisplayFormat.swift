@@ -73,10 +73,19 @@ public enum DisplayFormat {
     /// "<Kind>, <preview first 100 chars>, from <App>, <relative time>[, pinned]".
     public static func rowAccessibilityLabel(_ row: ClipRow, now: Date, locale: Locale = .current) -> String {
         var parts = [kindName(row.kind), String(row.previewText.prefix(accessibilityPreviewLimit))]
+        if row.kind == .text, let colour = TextHeuristics.hexColor(row.previewText) {
+            parts.append("colour \(colourHex(colour))")
+        }
         if let app = row.sourceAppName { parts.append("from \(app)") }
         parts.append(relativeTime(row.lastCopiedAt, now: now, locale: locale))
         if row.isPinned { parts.append("pinned") }
         return parts.joined(separator: ", ")
+    }
+
+    /// "#RRGGBB", alpha dropped.
+    public static func colourHex(_ c: TextHeuristics.RGBA) -> String {
+        func byte(_ v: Double) -> Int { Int((v * 255).rounded()) }
+        return String(format: "#%02X%02X%02X", byte(c.r), byte(c.g), byte(c.b))
     }
 
     public static func bytes(_ n: Int) -> String {

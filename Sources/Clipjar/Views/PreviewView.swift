@@ -31,12 +31,16 @@ struct PreviewView: View {
 }
 
 private struct PreviewHeader: View {
+    /// Larger texts are counted off the main thread, once per clip.
+    private static let inlineSummaryBytes = 100_000
+
     let clip: Clip
+    @State private var computedSummary: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Label(DisplayFormat.previewSummary(clip), systemImage: Self.icon(clip.kind))
+                Label(summary, systemImage: Self.icon(clip.kind))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -53,6 +57,24 @@ private struct PreviewHeader: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
+        }
+        .task(id: clip.id) {
+            guard isLarge else { return }
+            let clip = clip
+            computedSummary = await Task.detached(priority: .userInitiated) { DisplayFormat.previewSummary(clip) }.value
+        }
+    }
+
+    private var isLarge: Bool { clip.plainText.utf8.count > Self.inlineSummaryBytes }
+
+    private var summary: String {
+        if !isLarge { return DisplayFormat.previewSummary(clip) }
+        if let computedSummary { return computedSummary }
+        switch clip.kind {
+        case .text: return "Text"
+        case .link: return "Link"
+        case .image: return "Image"
+        case .file: return "Files"
         }
     }
 
@@ -80,23 +102,37 @@ private struct TextPreview: View {
     let text: String
     let terms: [String]
 
+    /// Counted once, off the main thread; only needed when the text is cut.
+    @State private var totalCount: Int?
+
     var body: some View {
-        let shown = String(text.prefix(Self.limit))
+        let head = text.prefix(Self.limit)
+        let isCut = head.endIndex < text.endIndex
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text(highlighted(shown))
+                Text(highlighted(String(head)))
                     .font(.body.monospaced())
                     .lineSpacing(2)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if shown.count < text.count {
-                    Text("Showing first \(Self.limit.formatted()) of \(text.count.formatted()) characters")
+                if isCut {
+                    Text(footer)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
         }
         .scrollIndicators(.automatic)
+        .task {
+            guard isCut, totalCount == nil else { return }
+            let text = text
+            totalCount = await Task.detached(priority: .userInitiated) { text.count }.value
+        }
+    }
+
+    private var footer: String {
+        guard let totalCount else { return "Showing first \(Self.limit.formatted()) characters" }
+        return "Showing first \(Self.limit.formatted()) of \(totalCount.formatted()) characters"
     }
 
     private func highlighted(_ s: String) -> AttributedString {
