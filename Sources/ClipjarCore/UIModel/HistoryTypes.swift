@@ -16,6 +16,13 @@ public enum Banner: Equatable, Sendable, Hashable, CaseIterable {
 
 public enum Toast: Equatable, Sendable { case deleted(Int64), confirmPinnedDelete(Int64) }
 
+/// A request for the list to scroll to a row. `serial` makes every request distinct, so asking for the same
+/// row again still scrolls.
+public struct ScrollRequest: Equatable, Sendable {
+    public let id: Int64
+    public let serial: Int
+}
+
 public struct PendingDeletion: Sendable, Equatable {
     public let id: Int64
     public let lastCopiedAt: Date

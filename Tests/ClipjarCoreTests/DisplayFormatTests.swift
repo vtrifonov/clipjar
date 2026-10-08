@@ -57,6 +57,12 @@ import Testing
         #expect(DisplayFormat.previewSummary(Clip.make("a\r\nb"), locale: us) == "Text · 3 characters · 2 lines")
     }
 
+    @Test func previewSummaryTrailingNewlineAddsNoLine() {
+        #expect(DisplayFormat.previewSummary(Clip.make("hello\n"), locale: us) == "Text · 6 characters · 1 line")
+        #expect(DisplayFormat.previewSummary(Clip.make("a\r\nb\r\n"), locale: us) == "Text · 4 characters · 2 lines")
+        #expect(DisplayFormat.previewSummary(Clip.make("a\n\n"), locale: us) == "Text · 3 characters · 2 lines")
+    }
+
     @Test func previewSummaryLink() {
         let clip = Clip.make("https://example.com/docs", kind: .link)
         #expect(DisplayFormat.previewSummary(clip, locale: us) == "Link · example.com")

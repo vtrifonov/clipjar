@@ -778,7 +778,7 @@ public struct PendingDeletion: Sendable, Equatable { public let id: Int64; publi
     public private(set) var banners: [Banner]            // Task 34
     public private(set) var toast: Toast?                // Task 33
     public private(set) var highlightTerms: [String]
-    public private(set) var scrollTarget: Int64?         // set only by keyboard moves; the view scrolls to it
+    public private(set) var scrollRequest: ScrollRequest? // keyboard moves and every open; distinct per request (scrollTarget = its id)
     public private(set) var openGeneration: Int          // Task 34: +1 per prepareForOpen (view refocuses search)
     public var isEmptyHistory: Bool { allCount == 0 }
     public var isNoResults: Bool { rows.isEmpty && !isEmptyHistory }
@@ -970,7 +970,7 @@ VoiceOver label), R90 (off-main decode function), R86/A27 (coalesced open reques
 ```swift
 public enum DisplayFormat {
     public static func countLabel(_ n: Int, locale: Locale = .current) -> String               // "1 clip", "1,204 clips"
-    public static func relativeTime(_ d: Date, now: Date, locale: Locale = .current) -> String  // "now" if < 60 s else RelativeDateTimeFormatter(.abbreviated)
+    public static func relativeTime(_ d: Date, now: Date, locale: Locale = .current) -> String  // "now" if < 60 s else RelativeDateTimeFormatter(.short), e.g. "2 min. ago"
     public static func secondaryLine(_ row: ClipRow, now: Date, locale: Locale = .current) -> String
         // "[domain · ]App · time"; files: "3 files · App · time"; missing app name omitted
     public static func previewSummary(_ clip: Clip, locale: Locale = .current) -> String

@@ -20,9 +20,9 @@ struct ClipListView: View {
                     .padding(6)
                     .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.9), value: model.selectedID)
                 }
-                .onChange(of: model.scrollTarget) { _, id in
-                    guard let id else { return }
-                    proxy.scrollTo(id, anchor: nil)
+                .onChange(of: model.scrollRequest) { _, request in
+                    guard let request else { return }
+                    proxy.scrollTo(request.id, anchor: nil)
                 }
             }
         }

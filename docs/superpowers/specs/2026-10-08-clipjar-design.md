@@ -788,8 +788,9 @@ so light/dark and the user's accent colour work automatically.
     (3 pt radius, 0.5 pt `.primary.opacity(0.2)` border); links show line 1 = the URL with the domain
     portion in `.primary` and the rest `.secondary`;
   - line 2 `.caption` (10 pt) `.secondary`: `[domain · ]AppName · relative time` (relative via
-    `RelativeDateTimeFormatter`, `.abbreviated`, refreshed every 60 s while open; "now" < 60 s);
-    files: "3 files · Finder · 2 min";
+    `RelativeDateTimeFormatter`, `.short` (e.g. "2 min. ago"; `.abbreviated` renders "2m ago" on macOS 26),
+    refreshed every 60 s while open; "now" < 60 s);
+    files: "3 files · Finder · 2 min. ago";
   - trailing: `pin.fill` 10 pt `.secondary` if pinned; `⌘1`…`⌘9` in `.caption2` monospaced `.tertiary`
     for the first 9 rows.
   - **Selection pill:** `RoundedRectangle(8, style: .continuous)` fill `accentColor.opacity(0.22)`

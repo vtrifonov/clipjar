@@ -243,7 +243,7 @@ struct ClipRowView: View {
 
 **Behaviour (R58):**
 - List: rows `ForEach(Array(model.rows.enumerated()), id: \.element.id)`; `.onAppear { model.rowAppeared(index:) }`;
-  `.onChange(of: model.scrollTarget) { id in proxy.scrollTo(id, anchor: nil) }` (keyboard moves only);
+  `.onChange(of: model.scrollRequest) { _, r in if let r { proxy.scrollTo(r.id, anchor: nil) } }` (keyboard moves and every open);
   `.onContinuousHover` → `model.hover(id:mouseLocation: NSEvent.mouseLocation)`; tap →
   `model.activate(id:copyOnly: NSEvent.modifierFlags.contains(.option))`; context menu: Paste, Copy,
   Pin/Unpin, Delete (each `model.select(id:)` then the matching `handle(...)`, labels show ⏎ ⌥⏎ ⌘P ⌘⌫).

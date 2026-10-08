@@ -27,18 +27,23 @@ import Observation
     public private(set) var rows: [ClipRow] = []
     public private(set) var selectedID: Int64?
     public private(set) var selectedClip: Clip?
+    /// Matching clips, not counting rows hidden as deleted.
     public private(set) var matchCount = 0
     public private(set) var allCount = 0
     public private(set) var banners: [Banner] = []
     public private(set) var toast: Toast?
     public private(set) var highlightTerms: [String] = []
-    /// Set only by keyboard moves; the view scrolls to it.
-    public private(set) var scrollTarget: Int64?
+    /// Set by keyboard moves and on every open; the view scrolls whenever it changes.
+    public private(set) var scrollRequest: ScrollRequest?
     /// +1 per `prepareForOpen`; the view refocuses the search field when it changes.
     public private(set) var openGeneration = 0
+    /// True from an open until its first rows arrive, so the panel doesn't flash "no results".
+    private var awaitingOpenRows = false
 
+    /// The row of the latest scroll request.
+    public var scrollTarget: Int64? { scrollRequest?.id }
     public var isEmptyHistory: Bool { allCount == 0 }
-    public var isNoResults: Bool { rows.isEmpty && !isEmptyHistory }
+    public var isNoResults: Bool { rows.isEmpty && !isEmptyHistory && !awaitingOpenRows }
 
     /// Internal test hook, called with every fetched rows emission.
     @ObservationIgnored var onRowsEmitted: (([ClipRow]) -> Void)?
@@ -76,9 +81,15 @@ import Observation
     @ObservationIgnored private var runtimeBanners: Set<Banner> = []
     @ObservationIgnored private var storageErrorExpiry: (any Cancellable)?
     private static let storageErrorDuration: TimeInterval = 6
-    /// Set while `prepareForOpen` resets the query and filter, so they don't restart observations twice.
-    @ObservationIgnored private var suppressRestart = false
+    /// Set from `prepareForOpen` until its prune finishes: rows stay empty and query/filter changes only
+    /// record state, so the observations restarted after the prune use the latest query.
+    @ObservationIgnored private var isPreparingOpen = false
     @ObservationIgnored private var scrollToFirstOnNextRows = false
+    @ObservationIgnored private var scrollSerial = 0
+    /// Count from the store; `matchCount` subtracts the hidden rows.
+    @ObservationIgnored private var fetchedMatchCount = 0
+    /// After an open the first hover only records the pointer, which may have moved while the panel was hidden.
+    @ObservationIgnored private var hoverNeedsBaseline = false
 
     public init(
         store: ClipStore,
@@ -156,24 +167,31 @@ import Observation
 
     // MARK: Open and banners
 
-    /// Resets the panel for a new open. Observations restart only after the open-time prune, so rows for
-    /// this open never include clips the prune removes.
+    /// Resets the panel for a new open. Rows and selection clear at once and observations restart only
+    /// after the open-time prune, so this open never shows or pastes a clip the prune removes.
     @discardableResult
     public func prepareForOpen() -> Task<Void, Never> {
         rowsTask?.cancel()
         matchTask?.cancel()
-        suppressRestart = true
+        isPreparingOpen = true
+        awaitingOpenRows = true
         query = ""
         filter = .all
-        suppressRestart = false
         limit = Self.pageSize
+        fetchedRows = []
+        selectFirstOnNextRows = true
+        applyRows()
+        hoverNeedsBaseline = true
         openGeneration += 1
+        let generation = openGeneration
         systemBanners = actions.systemBanners()
         updateBanners()
         let prune = actions.prune
         return Task { [weak self] in
             await prune()
-            guard let self else { return }
+            // A later open owns the restart once its own prune finishes.
+            guard let self, openGeneration == generation else { return }
+            isPreparingOpen = false
             scrollToFirstOnNextRows = true
             startObservations(selectFirst: true)
         }
@@ -325,7 +343,8 @@ import Observation
 
     /// Selects the hovered row only when the pointer really moved and no keyboard move just happened.
     public func hover(id: Int64, mouseLocation: CGPoint) {
-        let moved = lastMouseLocation != mouseLocation
+        let moved = !hoverNeedsBaseline && lastMouseLocation != mouseLocation
+        hoverNeedsBaseline = false
         lastMouseLocation = mouseLocation
         guard moved else { return }
         if let last = lastKeyMoveAt, clock().timeIntervalSince(last) < Self.hoverQuietPeriod { return }
@@ -334,7 +353,7 @@ import Observation
 
     /// Loads the next page when a row near the end appears and the current page was full.
     public func rowAppeared(index: Int) {
-        guard index >= rows.count - Self.pagingThreshold, fetchedRows.count == limit else { return }
+        guard !isPreparingOpen, index >= rows.count - Self.pagingThreshold, fetchedRows.count == limit else { return }
         limit += Self.pageSize
         startObservations(selectFirst: false)
     }
@@ -351,7 +370,7 @@ import Observation
     // MARK: Observation
 
     private func queryOrFilterChanged() {
-        guard !suppressRestart else { return }
+        guard !isPreparingOpen else { return }
         limit = Self.pageSize
         startObservations(selectFirst: true)
     }
@@ -364,7 +383,10 @@ import Observation
         highlightTerms = parsed.terms
         if selectFirst { selectFirstOnNextRows = true }
         rowsTask = observe(store.rowsObservation(q)) { [weak self] in self?.receive($0) }
-        matchTask = observe(store.countObservation(q)) { [weak self] in self?.matchCount = $0 }
+        matchTask = observe(store.countObservation(q)) { [weak self] in
+            self?.fetchedMatchCount = $0
+            self?.updateMatchCount()
+        }
     }
 
     private func observe<T>(
@@ -388,12 +410,23 @@ import Observation
         fetchedRows = fetched
         // A deleted row stays hidden only until an emission without it arrives.
         deletedIDs.formIntersection(fetched.map(\.id))
+        dropPendingIfRecopied(fetched)
         onRowsEmitted?(fetched)
+        awaitingOpenRows = false
         applyRows()
         if scrollToFirstOnNextRows {
             scrollToFirstOnNextRows = false
-            scrollTarget = rows.first?.id
+            requestScroll(to: rows.first?.id)
         }
+    }
+
+    /// A clip re-copied during the undo window is no longer pending: its row shows again at once.
+    private func dropPendingIfRecopied(_ fetched: [ClipRow]) {
+        guard let p = pending, let row = fetched.first(where: { $0.id == p.id }), row.lastCopiedAt != p.lastCopiedAt
+        else { return }
+        cancelPendingExpiry()
+        pending = nil
+        if case .deleted = toast { toast = nil }
     }
 
     /// Selection rules: first row after a query/filter change (once rows exist); otherwise keep the
@@ -402,6 +435,7 @@ import Observation
         rows = fetchedRows.filter { row in
             row.id != pending?.id && !committingIDs.contains(row.id) && !deletedIDs.contains(row.id)
         }
+        updateMatchCount()
         if selectFirstOnNextRows {
             if let first = rows.first {
                 selectFirstOnNextRows = false
@@ -421,6 +455,12 @@ import Observation
         } else {
             setSelection(nil, index: nil)
         }
+    }
+
+    /// Rows hidden as deleted are still in the store's count until their deletion commits.
+    private func updateMatchCount() {
+        let count = max(0, fetchedMatchCount - (fetchedRows.count - rows.count))
+        if count != matchCount { matchCount = count }
     }
 
     private func setSelection(_ id: Int64?, index: Int?) {
@@ -444,8 +484,14 @@ import Observation
         guard !rows.isEmpty else { return }
         let clamped = min(max(index, 0), rows.count - 1)
         setSelection(rows[clamped].id, index: clamped)
-        scrollTarget = selectedID
+        requestScroll(to: selectedID)
         lastKeyMoveAt = clock()
+    }
+
+    private func requestScroll(to id: Int64?) {
+        guard let id else { return }
+        scrollSerial += 1
+        scrollRequest = ScrollRequest(id: id, serial: scrollSerial)
     }
 
     private func cycleFilter(by step: Int) {

@@ -41,7 +41,10 @@ public enum DisplayFormat {
         switch clip.kind {
         case .text:
             let characters = clip.plainText.count
-            let lines = clip.plainText.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
+            var segments = clip.plainText.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            // A trailing newline ends the last line rather than starting another.
+            if segments.count > 1, segments.last?.isEmpty == true { segments.removeLast() }
+            let lines = segments.count
             return [
                 "Text",
                 "\(number(characters, locale: locale)) \(characters == 1 ? "character" : "characters")",

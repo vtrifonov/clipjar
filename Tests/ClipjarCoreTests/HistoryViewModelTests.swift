@@ -111,6 +111,26 @@ import Testing
         #expect(await eventually { h.vm.rows.count == 2 && h.vm.selectedID == h.ids[0] })
     }
 
+    /// The selected row still matches, so keeping it or the same-index fallback would both leave it selected.
+    @Test func filterChangeSelectsFirstEvenWhenSelectionStillMatches() async throws {
+        let h = try await VMHarness([
+            Clip.make("https://example.com/docs", kind: .link, at: t0),
+            Clip.make("Item 1", at: t0 + 1),
+            Clip.make("Item 2", at: t0 + 2),
+        ])
+        h.vm.select(id: h.ids[1])
+        h.vm.filter = .text
+        #expect(await eventually { h.vm.rows.count == 2 && h.vm.selectedID == h.ids[0] })
+    }
+
+    @Test func queryChangeSelectsFirstEvenWhenSelectionStillMatches() async throws {
+        let h = try await VMHarness(count: 3)
+        h.vm.select(id: h.ids[1])
+        h.vm.query = "Item"
+        #expect(await eventually { h.vm.selectedID == h.ids[0] })
+        #expect(h.vm.rows.map(\.id) == h.ids)
+    }
+
     @Test func querySearchesAndHighlights() async throws {
         let h = try await VMHarness([
             Clip.make("Hello, Clipjar", at: t0), Clip.make("Item 1", at: t0 + 1), Clip.make("Item 2", at: t0 + 2),
