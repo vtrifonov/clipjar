@@ -9,11 +9,12 @@ struct SettingsView: View {
     let settings: SettingsStore
     let store: ClipStore
     let retention: RetentionChanger
+    let storeErrors: StoreErrorReporter
 
     var body: some View {
         Form {
             GeneralSection(settings: settings)
-            HistorySection(settings: settings, store: store, retention: retention)
+            HistorySection(settings: settings, store: store, retention: retention, storeErrors: storeErrors)
             PrivacySection(settings: settings)
             Section {
                 Text(Self.versionLabel)
@@ -136,6 +137,8 @@ private struct HistorySection: View {
     let settings: SettingsStore
     let store: ClipStore
     let retention: RetentionChanger
+    /// Corruption writes the repair flag and shows the panel banner.
+    let storeErrors: StoreErrorReporter
 
     private struct Pending {
         let removing: Int
@@ -203,7 +206,7 @@ private struct HistorySection: View {
                 case let .needsConfirmation(n): pending = Pending(removing: n, limit: limit, maxAgeDays: maxAgeDays)
                 }
             } catch {
-                logFailure("retention change failed", error)
+                storeErrors.report(error)
                 revert()
             }
         }
@@ -215,7 +218,7 @@ private struct HistorySection: View {
             do {
                 try await retention.apply(limit: change.limit, maxAgeDays: change.maxAgeDays)
             } catch {
-                logFailure("retention apply failed", error)
+                storeErrors.report(error)
                 revert()
             }
         }
@@ -228,18 +231,10 @@ private struct HistorySection: View {
 
     private func clearHistory() {
         let store = store
+        let storeErrors = storeErrors
         Task {
-            do {
-                _ = try await store.clearAll(keepPinned: true)
-            } catch {
-                logFailure("clear history failed", error)
-            }
+            await storeErrors.reportIfStoreError { try await store.clearAll(keepPinned: true) }
         }
-    }
-
-    private func logFailure(_ message: StaticString, _ error: any Error) {
-        let e = error as NSError
-        Log.store.error("\(message, privacy: .public): \(e.domain, privacy: .public) \(e.code, privacy: .public)")
     }
 }
 

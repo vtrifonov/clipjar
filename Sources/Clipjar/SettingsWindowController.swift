@@ -9,8 +9,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var hasBeenShown = false
 
     /// `onClose` runs when the window closes, so focus can go back to the app the user came from.
-    init(settings: SettingsStore, store: ClipStore, retention: RetentionChanger, onClose: @escaping () -> Void) {
-        let hosting = NSHostingController(rootView: SettingsView(settings: settings, store: store, retention: retention))
+    init(
+        settings: SettingsStore,
+        store: ClipStore,
+        retention: RetentionChanger,
+        storeErrors: StoreErrorReporter,
+        onClose: @escaping () -> Void
+    ) {
+        let hosting = NSHostingController(rootView: SettingsView(
+            settings: settings, store: store, retention: retention, storeErrors: storeErrors
+        ))
         hosting.sizingOptions = .preferredContentSize
         window = NSWindow(contentViewController: hosting)
         window.styleMask = [.titled, .closable]

@@ -27,6 +27,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var target: SourceAppHandle?
     private var isShown = false
     private var isHidingImmediately = false
+    private var pasteGate = PasteGate()
     /// Bumped on every show, so a fade-out that finishes after a reopen leaves the panel up.
     private var showGeneration = 0
     private var keyMonitor: Any?
@@ -127,12 +128,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 MainActor.assumeIsolated { self?.finishHide(generation) }
             }
         }
-        guard NSApp.isActive else { return }
-        if let target {
-            _ = SystemAppActivator().activate(target)
-        } else {
-            restoreFocus()
-        }
+        if NSApp.isActive { returnFocus(to: target) }
     }
 
     private func finishHide(_ generation: Int) {
@@ -157,9 +153,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Ignored while another paste is still running (⏎⏎, ⏎ then ⌘1, a double-click).
     func paste(id: Int64, copyOnly: Bool) {
+        guard isShown, pasteGate.begin() else { return }
         let target = target
         Task {
+            defer { pasteGate.end() }
             let outcome = await paster.perform(
                 clipID: id,
                 target: target,
@@ -168,6 +167,18 @@ final class PanelController: NSObject, NSWindowDelegate {
                 closePanel: { await self.hideImmediately() }
             )
             Log.paste.info("outcome \(String(describing: outcome), privacy: .public)")
+            // Nothing was activated; don't leave a windowless Clipjar active with nowhere to type.
+            if case .copiedOnly = outcome, !isShown, NSApp.isActive {
+                returnFocus(to: target)
+            }
+        }
+    }
+
+    private func returnFocus(to target: SourceAppHandle?) {
+        if let target {
+            _ = SystemAppActivator().activate(target)
+        } else {
+            restoreFocus()
         }
     }
 

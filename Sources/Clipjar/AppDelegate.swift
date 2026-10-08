@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController?
     private var hotkey: HotkeyController?
     private var store: ClipStore?
+    private var openResult: OpenResult?
+    private var storeErrors: StoreErrorReporter?
     private var model: HistoryViewModel?
     private var panel: PanelController?
     private var settingsWindow: SettingsWindowController?
@@ -95,14 +97,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             let store = result.store
             self.store = store
+            openResult = result
+            // Corruption from any store call writes the repair flag and shows the banner.
+            let storeErrors = StoreErrorReporter(supportDirectory: result.supportDirectory) { self.handle($0) }
+            self.storeErrors = storeErrors
             await store.configure(limit: settings.historyLimit, maxAgeDays: settings.maxAgeDays)
-            _ = try? await store.prune(limit: settings.historyLimit, maxAgeDays: settings.maxAgeDays, now: Date())
+            await storeErrors.reportIfStoreError {
+                try await store.prune(limit: settings.historyLimit, maxAgeDays: settings.maxAgeDays, now: Date())
+            }
             _ = captures.startConsuming(store: store, supportDirectory: result.supportDirectory) {
                 self.handle($0)
             }
-            Task.detached(priority: .utility) { _ = try? await store.cleanOrphanBlobs(now: Date()) }
+            // The sweep runs on the store actor, off the main thread.
+            Task(priority: .utility) {
+                await storeErrors.reportIfStoreError { try await store.cleanOrphanBlobs(now: Date()) }
+            }
 
-            buildPanel(store: store, result: result, settings: settings)
+            buildPanel(store: store, result: result, settings: settings, storeErrors: storeErrors)
         }
 
         // 8. First launch shows the panel once, centred.
@@ -112,28 +123,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func buildPanel(store: ClipStore, result: OpenResult, settings: SettingsStore) {
+    private func buildPanel(
+        store: ClipStore, result: OpenResult, settings: SettingsStore, storeErrors: StoreErrorReporter
+    ) {
         let paster = Paster(
             store: store,
             pasteboard: SystemPasteboard(),
             ax: SystemAccessibility(),
             keys: SystemKeyPoster(),
             apps: SystemAppActivator(),
-            sleep: { try? await Task.sleep(for: $0) }
+            sleep: { try? await Task.sleep(for: $0) },
+            reportStoreError: { storeErrors.report($0) }
         )
-        let supportDirectory = result.supportDirectory
         let actions = HistoryActions(
             paste: { [weak self] id, copyOnly in self?.panel?.paste(id: id, copyOnly: copyOnly) },
             close: { [weak self] in self?.panel?.hide() },
             openSettings: { [weak self] in self?.openSettings() },
             beep: { NSSound.beep() },
             prune: {
-                _ = try? await store.prune(limit: settings.historyLimit, maxAgeDays: settings.maxAgeDays, now: Date())
+                await storeErrors.reportIfStoreError {
+                    try await store.prune(limit: settings.historyLimit, maxAgeDays: settings.maxAgeDays, now: Date())
+                }
             },
             systemBanners: { [weak self] in self?.systemBanners() ?? [] },
-            reportStoreError: { [weak self] error in
-                self?.handle(StoreErrorClassifier.classify(error, supportDirectory: supportDirectory))
-            }
+            reportStoreError: { storeErrors.report($0) }
         )
         let model = HistoryViewModel(store: store, actions: actions)
         self.model = model
@@ -189,10 +202,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func pruneNow() {
-        guard let store, let settings else { return }
+        guard let store, let settings, let storeErrors else { return }
         let limit = settings.historyLimit
         let maxAgeDays = settings.maxAgeDays
-        Task { _ = try? await store.prune(limit: limit, maxAgeDays: maxAgeDays, now: Date()) }
+        Task {
+            await storeErrors.reportIfStoreError {
+                try await store.prune(limit: limit, maxAgeDays: maxAgeDays, now: Date())
+            }
+        }
     }
 
     /// Holds a user-initiated activity while capturing so App Nap doesn't stretch the poll timer.
@@ -248,13 +265,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Closes the panel first, so focus returns to the target app if Settings is closed.
     func openSettings() {
         panel?.hide()
-        guard let settings, let store else {
+        guard let settings, let store, let storeErrors else {
             Log.panel.info("settings requested before the store opened")
             return
         }
         if settingsWindow == nil {
             settingsWindow = SettingsWindowController(
                 settings: settings, store: store, retention: RetentionChanger(store: store, settings: settings),
+                storeErrors: storeErrors,
                 onClose: { [weak self] in self?.settingsClosed() }
             )
         }
@@ -275,16 +293,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Commits a pending deletion and any pending scrub before exit. Store work runs on the store
-    /// actor, never on the main thread, so waiting here can't deadlock.
+    /// actor, never on the main thread, so waiting here can't deadlock. Errors are classified off the
+    /// main thread (no banner any more, but corruption still leaves the repair flag for the next launch).
     func applicationWillTerminate(_ notification: Notification) {
         guard let store else { return }
         let pending = model?.takePendingDeletionForTermination()
+        let supportDirectory = openResult?.supportDirectory
         let done = DispatchSemaphore(value: 0)
         Task.detached {
-            if let p = pending { _ = try? await store.delete(id: p.id, ifLastCopiedAt: p.lastCopiedAt) }
-            try? await store.scrubIfPending()
+            do {
+                if let p = pending { _ = try await store.delete(id: p.id, ifLastCopiedAt: p.lastCopiedAt) }
+                try await store.scrubIfPending()
+            } catch {
+                _ = StoreErrorClassifier.classify(error, supportDirectory: supportDirectory)
+            }
             done.signal()
         }
         _ = done.wait(timeout: .now() + 2)
+        // In-memory fallback only: its image files must not outlive the session.
+        openResult?.removeTemporaryBlobs()
     }
 }
