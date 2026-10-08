@@ -7,7 +7,7 @@ set -euo pipefail
 # and HTML import into NSAttributedString, which fetches subresources. Building an https URL from a
 # prefix, as link detection does, is not flagged.
 pattern='URLSession|NSURLSession|NSURLConnection|URLRequest|import Network|Network\.framework|NWConnection|CFNetwork|CFStream|CFSocket|getStreamsToHost|getaddrinfo|SCNetworkReachability|WebKit|\bsocket\(|\bconnect\('
-pattern+='|URL\(string: *"https?://[^"]+"\)|contentsOf: *URL\(string|DocumentType\.html|documentType: *\.html'
+pattern+='|URL\(string: *"https?://[^"]+"\)|contentsOf: *URL\(string|DocumentType\.html|documentType: *\.html|NSAttributedString\(html:'
 
 set +e
 matches=$(rg -n "$pattern" Sources)
