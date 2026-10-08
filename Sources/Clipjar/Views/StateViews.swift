@@ -71,12 +71,14 @@ struct NoResultsView: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            Text("No clips match “\(query)”")
+            Text(query.isEmpty ? "No clips match this filter" : "No clips match “\(query)”")
                 .font(.title3.weight(.medium))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
             HStack(spacing: 16) {
-                Button("Clear Search", action: onClear)
+                if !query.isEmpty {
+                    Button("Clear Search", action: onClear)
+                }
                 if showSearchAll {
                     Button("Search All Types", action: onSearchAll)
                 }
