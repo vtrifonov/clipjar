@@ -22,3 +22,49 @@ public enum SensitiveTypes {
         "com.typeit4me.clipping", "Pasteboard generator type",
     ]
 }
+
+public struct PasteboardSnapshot: Sendable, Equatable {
+    public var changeCount: Int
+    public var types: Set<String>
+    public var string: String?
+    public var rtf: Data?
+    public var html: Data?
+    public var image: ImageData?
+    public var fileURLs: [URL]
+    public var declaredSource: String?
+
+    public init(
+        changeCount: Int,
+        types: Set<String>,
+        string: String? = nil,
+        rtf: Data? = nil,
+        html: Data? = nil,
+        image: ImageData? = nil,
+        fileURLs: [URL] = [],
+        declaredSource: String? = nil
+    ) {
+        self.changeCount = changeCount
+        self.types = types
+        self.string = string
+        self.rtf = rtf
+        self.html = html
+        self.image = image
+        self.fileURLs = fileURLs
+        self.declaredSource = declaredSource
+    }
+}
+
+@MainActor public protocol PasteboardReading: AnyObject {
+    var changeCount: Int { get }
+    /// Type metadata only; reads no content data.
+    func types() -> Set<String>
+    /// The `org.nspasteboard.source` bundle id, if the writer declared one.
+    func declaredSource() -> String?
+    func fileURLs() -> [URL]
+    func string() -> String?
+    func data(forType type: String) -> Data?
+}
+
+@MainActor public protocol PasteboardWriting: AnyObject {
+    func write(_ payload: ClipPayload)
+}
