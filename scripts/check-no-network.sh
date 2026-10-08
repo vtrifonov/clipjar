@@ -2,7 +2,12 @@
 # Fails if any networking API appears in Sources/ (Clipjar is local-only).
 set -euo pipefail
 
-pattern='URLSession|NSURLConnection|import Network|NWConnection|CFNetwork|CFStream|SCNetworkReachability|WebKit|\bsocket\(|\bconnect\('
+# Networking APIs by name, plus APIs that reach the network as a side effect: complete http(s) URL
+# literals and `contentsOf:` loads of string-built URLs (e.g. `Data(contentsOf: URL(string: "https://…"))`),
+# and HTML import into NSAttributedString, which fetches subresources. Building an https URL from a
+# prefix, as link detection does, is not flagged.
+pattern='URLSession|NSURLSession|NSURLConnection|URLRequest|import Network|Network\.framework|NWConnection|CFNetwork|CFStream|CFSocket|getStreamsToHost|getaddrinfo|SCNetworkReachability|WebKit|\bsocket\(|\bconnect\('
+pattern+='|URL\(string: *"https?://[^"]+"\)|contentsOf: *URL\(string|DocumentType\.html|documentType: *\.html'
 
 set +e
 matches=$(rg -n "$pattern" Sources)
