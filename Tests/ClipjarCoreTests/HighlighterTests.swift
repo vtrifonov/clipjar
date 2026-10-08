@@ -45,6 +45,17 @@ import Testing
         #expect(String(text[ranges[0]]).count == 60)
     }
 
+    /// ~5M matches in a 10 MB text: only the first 50 may be searched for, so this stays fast.
+    @Test func largeInputStopsAtCap() {
+        let text = String(repeating: "e ", count: 5_000_000)
+        let start = ContinuousClock.now
+        let ranges = Highlighter.ranges(of: ["e"], in: text)
+        let elapsed = ContinuousClock.now - start
+        #expect(ranges.count == 50)
+        #expect(text.distance(from: text.startIndex, to: ranges[49].lowerBound) == 98)
+        #expect(elapsed < .milliseconds(500), "took \(elapsed)")
+    }
+
     @Test func emptyTerms() {
         #expect(Highlighter.ranges(of: [], in: "Hello, Clipjar").isEmpty)
         #expect(Highlighter.ranges(of: [""], in: "Hello, Clipjar").isEmpty)
