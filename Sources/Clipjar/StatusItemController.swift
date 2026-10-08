@@ -1,5 +1,6 @@
 import AppKit
 import ClipjarCore
+import KeyboardShortcuts
 import Observation
 
 /// The menu bar icon: left click toggles the panel, right or control click shows the menu.
@@ -72,6 +73,7 @@ final class StatusItemController: NSObject {
         openItem.title = "Open Clipjar"
         openItem.action = #selector(openClicked)
         openItem.target = self
+        openItem.setShortcut(for: .togglePanel)
         menu.addItem(openItem)
         menu.addItem(.separator())
         menu.addItem(menuItem("Pause for 15 Minutes", #selector(pauseBrieflyClicked)))
