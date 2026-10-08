@@ -19,3 +19,4 @@ jobs:
           path: .build
           key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
       - run: make test
+      - run: make app

@@ -13,7 +13,7 @@ enum MainMenu {
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""
         )
-        appMenu.addItem(withTitle: "Settings…", action: Selector(("openSettings:")), keyEquivalent: ",")
+        appMenu.addItem(withTitle: "Settings…", action: #selector(AppDelegate.openSettings(_:)), keyEquivalent: ",")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Clipjar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         add(appMenu, to: main)

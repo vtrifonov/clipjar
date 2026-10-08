@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.vtrifonov.clipjar</string>
+	<key>CFBundleName</key>
+	<string>Clipjar</string>
+	<key>CFBundleDisplayName</key>
+	<string>Clipjar</string>
+	<key>CFBundleExecutable</key>
+	<string>Clipjar</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSAppSleepDisabled</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Vasil Trifonov. MIT License.</string>
+</dict>
+</plist>
