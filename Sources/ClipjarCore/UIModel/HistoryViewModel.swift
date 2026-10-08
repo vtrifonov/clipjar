@@ -1,3 +1,4 @@
+import Combine
 import CoreGraphics
 import Foundation
 import GRDB
@@ -58,6 +59,18 @@ import Observation
     @ObservationIgnored private var allTask: Task<Void, Never>?
     @ObservationIgnored private var clipTask: Task<Void, Never>?
 
+    /// The undoable deletion behind the `.deleted` toast; at most one at a time.
+    @ObservationIgnored private var pending: PendingDeletion?
+    @ObservationIgnored private var pendingExpiry: (any Cancellable)?
+    /// Deletions being committed, then deleted rows until an emission no longer contains them.
+    @ObservationIgnored private var committingIDs: Set<Int64> = []
+    @ObservationIgnored private var deletedIDs: Set<Int64> = []
+    /// First ⌘⌫ on a pinned clip; a second one on the same clip within the window deletes it.
+    @ObservationIgnored private var pinnedConfirmation: (id: Int64, at: Date)?
+    @ObservationIgnored private var pinnedConfirmationExpiry: (any Cancellable)?
+    private static let undoWindow: TimeInterval = 5
+    private static let pinnedConfirmationWindow: TimeInterval = 2
+
     public init(
         store: ClipStore,
         actions: HistoryActions,
@@ -117,16 +130,121 @@ import Observation
         case .nextFilter: cycleFilter(by: 1)
         case .previousFilter: cycleFilter(by: -1)
         case .escape:
-            if query.isEmpty {
+            if toast != nil {
+                dismissToast()
+            } else if query.isEmpty {
                 actions.close()
             } else {
                 query = ""
             }
         case .close: actions.close()
         case .openSettings: actions.openSettings()
-        case .delete, .undoDelete: return false
+        case .delete: deleteSelection()
+        case .undoDelete: return undoDelete()
         }
         return true
+    }
+
+    // MARK: Delete / undo
+
+    /// Commits the pending deletion: `DELETE … WHERE id AND lastCopiedAt`, so a clip re-copied during the
+    /// undo window survives and reappears. nil when nothing is pending.
+    @discardableResult
+    public func commitPendingDeletion() -> Task<Void, Never>? {
+        cancelPendingExpiry()
+        guard let p = pending else { return nil }
+        pending = nil
+        if case .deleted = toast { toast = nil }
+        committingIDs.insert(p.id)
+        let store = store
+        return Task { [weak self] in
+            var deleted = false
+            do {
+                deleted = try await store.delete(id: p.id, ifLastCopiedAt: p.lastCopiedAt)
+            } catch {
+                self?.actions.reportStoreError(error)
+            }
+            self?.finishCommit(p.id, deleted: deleted)
+        }
+    }
+
+    /// For app termination: hands the pending deletion to the caller, which commits it.
+    public func takePendingDeletionForTermination() -> PendingDeletion? {
+        cancelPendingExpiry()
+        guard let p = pending else { return nil }
+        pending = nil
+        deletedIDs.insert(p.id)
+        if case .deleted = toast { toast = nil }
+        return p
+    }
+
+    /// Dismissing the delete toast commits the deletion.
+    public func dismissToast() {
+        switch toast {
+        case .deleted: commitPendingDeletion()
+        case .confirmPinnedDelete: clearPinnedConfirmation()
+        case nil: break
+        }
+    }
+
+    private func deleteSelection() {
+        guard let index = currentIndex else {
+            actions.beep()
+            return
+        }
+        let row = rows[index]
+        if row.isPinned, !confirmsPinnedDelete(of: row.id) {
+            commitPendingDeletion()
+            pinnedConfirmation = (row.id, clock())
+            toast = .confirmPinnedDelete(row.id)
+            pinnedConfirmationExpiry?.cancel()
+            pinnedConfirmationExpiry = scheduler(clock().addingTimeInterval(Self.pinnedConfirmationWindow)) {
+                [weak self] in
+                if self?.toast == .confirmPinnedDelete(row.id) { self?.clearPinnedConfirmation() }
+            }
+            return
+        }
+        clearPinnedConfirmation()
+        commitPendingDeletion()
+        pending = PendingDeletion(id: row.id, lastCopiedAt: row.lastCopiedAt, index: index)
+        applyRows()
+        toast = .deleted(row.id)
+        pendingExpiry = scheduler(clock().addingTimeInterval(Self.undoWindow)) { [weak self] in
+            self?.commitPendingDeletion()
+        }
+    }
+
+    private func confirmsPinnedDelete(of id: Int64) -> Bool {
+        guard let c = pinnedConfirmation, c.id == id else { return false }
+        return clock().timeIntervalSince(c.at) <= Self.pinnedConfirmationWindow
+    }
+
+    private func clearPinnedConfirmation() {
+        pinnedConfirmationExpiry?.cancel()
+        pinnedConfirmationExpiry = nil
+        pinnedConfirmation = nil
+        if case .confirmPinnedDelete = toast { toast = nil }
+    }
+
+    private func undoDelete() -> Bool {
+        guard case let .deleted(id) = toast, let p = pending, p.id == id else { return false }
+        cancelPendingExpiry()
+        pending = nil
+        toast = nil
+        applyRows()
+        select(id: id)
+        return true
+    }
+
+    private func finishCommit(_ id: Int64, deleted: Bool) {
+        committingIDs.remove(id)
+        if deleted && fetchedRows.contains(where: { $0.id == id }) { deletedIDs.insert(id) }
+        applyRows()
+    }
+
+    private func cancelPendingExpiry() {
+        pendingExpiry?.cancel()
+        pendingExpiry = nil
     }
 
     /// Selects the hovered row only when the pointer really moved and no keyboard move just happened.
@@ -191,6 +309,8 @@ import Observation
 
     private func receive(_ fetched: [ClipRow]) {
         fetchedRows = fetched
+        // A deleted row stays hidden only until an emission without it arrives.
+        deletedIDs.formIntersection(fetched.map(\.id))
         onRowsEmitted?(fetched)
         applyRows()
     }
@@ -198,7 +318,9 @@ import Observation
     /// Selection rules: first row after a query/filter change (once rows exist); otherwise keep the
     /// selected row, else the row now at its previous index, else nothing.
     private func applyRows() {
-        rows = fetchedRows
+        rows = fetchedRows.filter { row in
+            row.id != pending?.id && !committingIDs.contains(row.id) && !deletedIDs.contains(row.id)
+        }
         if selectFirstOnNextRows {
             if let first = rows.first {
                 selectFirstOnNextRows = false
