@@ -25,18 +25,29 @@ public actor ClipStore {
         self.thumbnailer = thumbnailer
     }
 
-    /// Lookup by hash and bump-or-insert run in one write transaction.
+    /// Image files are written before the transaction; lookup by hash and bump-or-insert run in one
+    /// write transaction. If that transaction fails, only the files this call created are removed.
     @discardableResult
     public func ingest(_ c: CapturedContent, source: SourceApp?, at now: Date) throws -> IngestResult {
         let hash = ContentHash.of(c)
-        return try writer.write { db in
-            if var existing = try Clip.filter(Column("contentHash") == hash).fetchOne(db) {
-                try Self.bump(&existing, with: c, source: source, now: now, db: db)
-                return .bumped(try Self.requireID(existing))
+        let files = c.kind == .image ? try c.image.map { try writeImageFiles($0, hash: hash) } : nil
+        do {
+            return try writer.write { db in
+                if var existing = try Clip.filter(Column("contentHash") == hash).fetchOne(db) {
+                    try Self.bump(&existing, with: c, files: files, source: source, now: now, db: db)
+                    return .bumped(try Self.requireID(existing))
+                }
+                var clip = ClipBuilder.makeClip(from: c, hash: hash, source: source, now: now)
+                if let files {
+                    clip.imagePath = files.imagePath
+                    clip.thumbnailPath = files.newThumbnailPath
+                }
+                try clip.insert(db)
+                return .inserted(try Self.requireID(clip))
             }
-            var clip = ClipBuilder.makeClip(from: c, hash: hash, source: source, now: now)
-            try clip.insert(db)
-            return .inserted(try Self.requireID(clip))
+        } catch {
+            blobs.remove(files?.created ?? [])
+            throw error
         }
     }
 
@@ -44,9 +55,40 @@ public actor ClipStore {
         try writer.close()
     }
 
+    private struct ImageFiles {
+        var imagePath: String
+        /// Set when this call produced a thumbnail.
+        var newThumbnailPath: String?
+        /// Set when the thumbnail file exists on disk, whoever wrote it.
+        var existingThumbnailPath: String?
+        var created: [String]
+    }
+
+    /// A write failure removes anything this call created and rethrows.
+    private func writeImageFiles(_ image: ImageData, hash: String) throws -> ImageFiles {
+        let name = BlobFiles.imageName(hash: hash, uti: image.uti)
+        let thumbName = BlobFiles.thumbnailName(hash: hash)
+        let thumb = thumbnailer(image.data)
+        var created: [String] = []
+        do {
+            if try blobs.writeIfAbsent(image.data, name: name) { created.append(name) }
+            if let thumb, try blobs.writeIfAbsent(thumb, name: thumbName) { created.append(thumbName) }
+        } catch {
+            blobs.remove(created)
+            throw error
+        }
+        return ImageFiles(
+            imagePath: name,
+            newThumbnailPath: thumb != nil ? thumbName : nil,
+            existingThumbnailPath: thumb != nil || blobs.exists(thumbName) ? thumbName : nil,
+            created: created
+        )
+    }
+
     /// `updateChanges` writes only changed columns, so the `searchText` FTS trigger never fires.
     private static func bump(
-        _ existing: inout Clip, with c: CapturedContent, source: SourceApp?, now: Date, db: Database
+        _ existing: inout Clip, with c: CapturedContent, files: ImageFiles?, source: SourceApp?, now: Date,
+        db: Database
     ) throws {
         try existing.updateChanges(db) { clip in
             clip.lastCopiedAt = now
@@ -56,6 +98,10 @@ public actor ClipStore {
             }
             if clip.rtfData == nil, let rtf = c.rtf { clip.rtfData = rtf }
             if clip.htmlData == nil, let html = c.html { clip.htmlData = html }
+            if let files {
+                if clip.imagePath == nil { clip.imagePath = files.imagePath }
+                if clip.thumbnailPath == nil { clip.thumbnailPath = files.existingThumbnailPath }
+            }
         }
     }
 

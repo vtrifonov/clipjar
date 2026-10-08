@@ -65,6 +65,14 @@ func text(_ s: String, kind: ClipKind = .text, rtf: Data? = nil, html: Data? = n
     CapturedContent(kind: kind, plainText: s, rtf: rtf, html: html)
 }
 
+func image(_ data: Data, uti: String = "public.png") -> CapturedContent {
+    let size = TestImages.pixelSize(of: data)
+    return CapturedContent(
+        kind: .image, plainText: "", image: ImageData(data: data, uti: uti),
+        width: size?.width, height: size?.height
+    )
+}
+
 let textEdit = SourceApp(bundleID: "com.apple.TextEdit", name: "TextEdit")
 let safari = SourceApp(bundleID: "com.apple.Safari", name: "Safari")
 
