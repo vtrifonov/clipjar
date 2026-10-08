@@ -17,6 +17,8 @@ public actor ClipStore {
     private(set) var lastScrubCommand: FTSScrub?
     /// Set only by prune-driven scrubs; user deletions take no `now`.
     private var lastScrubAt: Date?
+    /// A user deletion's scrub is pending: the next prune retries it without waiting for the hourly window.
+    private var userScrubPending = false
     /// Test seam: when set, every scrub throws this before touching the database.
     private var scrubFault: (any Error)?
 
@@ -143,25 +145,30 @@ extension ClipStore {
     }
 
     /// Deletes unpinned rows older than `maxAgeDays` or beyond `limit`, then removes their blob files.
-    /// The full scrub is deferred to at most once per hour; `scrubIfPending` completes it.
+    /// A pruned row's scrub is deferred to at most once per hour; every prune (ingest, open, wake), even
+    /// one that deletes nothing, runs a pending scrub once that hour has passed, and a pending user-deletion
+    /// scrub at once. `scrubIfPending` completes any of them.
     @discardableResult
     public func prune(limit: HistoryLimit, maxAgeDays: Int, now: Date) throws -> Int {
-        guard let candidates = Self.pruneCandidates(limit: limit, maxAgeDays: maxAgeDays, now: now) else { return 0 }
-        let deleted = try writer.write { db in
-            let deleted = try Self.deleteRows(db, where: "id IN (\(literal: candidates))")
-            if deleted.count > 0 {
-                try db.execute(sql: "INSERT INTO clip_fts(clip_fts, rank) VALUES('merge', 16)")
+        var count = 0
+        if let candidates = Self.pruneCandidates(limit: limit, maxAgeDays: maxAgeDays, now: now) {
+            let deleted = try writer.write { db in
+                let deleted = try Self.deleteRows(db, where: "id IN (\(literal: candidates))")
+                if deleted.count > 0 {
+                    try db.execute(sql: "INSERT INTO clip_fts(clip_fts, rank) VALUES('merge', 16)")
+                }
+                return deleted
             }
-            return deleted
+            blobs.remove(deleted.blobNames)
+            if deleted.count > 0 { markScrubPending(.optimize) }
+            count = deleted.count
         }
-        blobs.remove(deleted.blobNames)
-        guard deleted.count > 0 else { return 0 }
-        markScrubPending(.optimize)
+        guard let pendingScrub else { return count }
         // abs: a clock set backwards must not postpone the scrub until it catches up again.
-        if lastScrubAt.map({ abs(now.timeIntervalSince($0)) >= 3600 }) ?? true {
-            try scrubAfterCommittedDelete(.optimize, at: now)
+        if userScrubPending || lastScrubAt.map({ abs(now.timeIntervalSince($0)) >= 3600 }) ?? true {
+            try scrubAfterCommittedDelete(pendingScrub, at: now)
         }
-        return deleted.count
+        return count
     }
 
     /// The deletion already committed, so a scrub failure is logged and left pending rather than thrown,
@@ -209,6 +216,7 @@ extension ClipStore {
         optimizeRunCount += 1
         lastScrubCommand = command
         pendingScrub = nil
+        userScrubPending = false
         if let now { lastScrubAt = now }
     }
 
@@ -303,7 +311,11 @@ extension ClipStore {
     private func deleteCommitted(where condition: SQL, scrub command: FTSScrub) throws -> Int {
         let deleted = try writer.write { db in try Self.deleteRows(db, where: condition) }
         blobs.remove(deleted.blobNames)
-        if deleted.count > 0 { try scrubAfterCommittedDelete(command, at: nil) }
+        if deleted.count > 0 {
+            // Set first: a scrub that fails, is busy or throws leaves it pending for the next prune.
+            userScrubPending = true
+            try scrubAfterCommittedDelete(command, at: nil)
+        }
         return deleted.count
     }
 }

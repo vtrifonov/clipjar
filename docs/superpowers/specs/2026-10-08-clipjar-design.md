@@ -365,7 +365,7 @@ public enum ClipFilter {
 
 - R28. `start` runs a MainActor `Task` loop (`poll(); try await Task.sleep(for: interval,
   tolerance: .milliseconds(100))` until cancelled; `stop` cancels it) — no `Timer` closure isolation
-  issues — and polls once immediately so the clipboard present at launch is captured.
+  issues — and polls once immediately; that first poll only records `changeCount`, so the clipboard present at launch (whose origin the ignore list cannot check) is never read or captured.
 - R29. `poll()`: update tick state (R82); if `changeCount == lastChangeCount` return. Otherwise set `lastChangeCount` first
   (always — so content copied while paused/ignored is never captured later). Run preflight (R26) with
   candidates per R82; then `ClipReader.read` (R81); then `ClipExtractor.extract`; if non-nil call `sink`
@@ -1020,7 +1020,7 @@ Paste, Copy, Pin/Unpin, Delete (with the same shortcuts displayed).
   - **ClipboardWatcher:** no change → no sink; captured once; paused/ignored/concealed/marker → **zero
     data reads**; paused content not captured after resume; declared source preferred; Clipjar frontmost →
     `source == nil`; activation sequence [ignored → other] within one tick → rejected (R82); ignored app
-    activated, ≥ 1 idle tick, then a copy in another app → accepted (N4); launch capture;
+    activated, ≥ 1 idle tick, then a copy in another app → accepted (N4); launch clipboard not captured;
     ordered ingest through the AsyncStream consumer (3 captures → 3 rows in copy order).
   - **ClipStore:** insert each kind; bump updates `lastCopiedAt`/source, fills missing rtf, keeps
     `createdAt`/`isPinned`/`plainText`, writes no new blob; image bump with missing blob/thumb rewrites

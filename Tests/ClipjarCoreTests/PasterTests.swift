@@ -14,6 +14,10 @@ import Testing
         func record(_ d: Duration) { durations.append(d) }
     }
 
+    @MainActor final class StoreErrorLog {
+        var errors: [any Error] = []
+    }
+
     @MainActor final class Harness {
         let fx: StoreFixture
         let log = EventLog()
@@ -22,6 +26,7 @@ import Testing
         let keys: FakeKeyPoster
         let apps: FakeApps
         let sleeps = SleepLog()
+        let storeErrors = StoreErrorLog()
         let paster: Paster
         var clipID: Int64 = 0
 
@@ -31,9 +36,11 @@ import Testing
             apps = FakeApps(log: log)
             apps.frontmostScript = [PasterTests.pid]
             let sleeps = sleeps
+            let storeErrors = storeErrors
             paster = Paster(
                 store: fx.store, pasteboard: pb, ax: ax, keys: keys, apps: apps,
-                sleep: { await sleeps.record($0) }, clock: { PasterTests.pasteTime }
+                sleep: { await sleeps.record($0) }, clock: { PasterTests.pasteTime },
+                reportStoreError: { storeErrors.errors.append($0) }
             )
             pb.onWrite = { [log] in log.add("write") }
             let result = try await fx.store.ingest(text("Hello, Clipjar"), source: nil, at: t0)
@@ -154,5 +161,23 @@ import Testing
         }
         #expect(await h.perform() == .pasted)
         #expect(h.keys.posts == 1)
+        #expect(await eventually { h.storeErrors.errors.count == 1 })
+    }
+
+    /// A failed payload read is reported (so corruption can be classified and flagged), not just logged.
+    @Test func payloadReadErrorReported() async throws {
+        let h = try await Harness()
+        try h.fx.store.close()
+        #expect(await h.perform() == .copiedOnly(.userRequested))
+        #expect(h.storeErrors.errors.count == 1)
+        #expect(h.apps.beeps == 1)
+        #expect(h.pb.written.isEmpty)
+        #expect(h.keys.posts == 0)
+    }
+
+    @Test func missingPayloadReportsNoError() async throws {
+        let h = try await Harness()
+        _ = await h.perform(id: 987_654)
+        #expect(h.storeErrors.errors.isEmpty)
     }
 }

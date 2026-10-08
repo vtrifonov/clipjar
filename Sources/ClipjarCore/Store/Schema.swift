@@ -37,6 +37,8 @@ public enum Schema {
         config.busyMode = .timeout(5)
         config.prepareDatabase { db in
             try db.execute(sql: "PRAGMA secure_delete = ON")
+            // Sorts and FTS merges must not spill clip text to temp files outside the support directory.
+            try db.execute(sql: "PRAGMA temp_store = MEMORY")
         }
         return config
     }

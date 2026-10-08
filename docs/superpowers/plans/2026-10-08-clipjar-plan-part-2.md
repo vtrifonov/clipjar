@@ -257,7 +257,7 @@ calls `releaseGlobally()` in `defer`):
 ```
 
 **Behaviour:**
-- State: `lastChangeCount: Int? = nil` (so the first poll captures the clipboard present at launch),
+- State: `lastChangeCount: Int? = nil` (the first poll only records it; the launch clipboard is never captured),
   `frontmostAtLastTick: SourceApp?`, `activatedSinceTick: [SourceApp]`.
 - `poll()` exactly in this order:
   1. `frontNow = frontmostApp()`; `prevFront = frontmostAtLastTick`; `activated = activatedSinceTick`;

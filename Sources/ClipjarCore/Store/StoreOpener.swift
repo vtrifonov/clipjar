@@ -10,12 +10,31 @@ public struct OpenResult: Sendable {
     public let ranRepairChecks: Bool
     /// nil for in-memory.
     public let supportDirectory: URL?
+
+    /// In-memory fallback only: deletes the temporary blobs directory, so images copied during the session
+    /// don't outlive it. Call at termination, after the last store use. Does nothing for a persistent store.
+    public func removeTemporaryBlobs() {
+        guard storageUnavailable else { return }
+        let dir = store.blobsDirectory
+        // Only ever a directory `openInMemory` created.
+        guard dir.lastPathComponent.hasPrefix(StoreOpener.inMemoryBlobsPrefix),
+              dir.deletingLastPathComponent().standardizedFileURL.path
+                == FileManager.default.temporaryDirectory.standardizedFileURL.path,
+              FileManager.default.fileExists(atPath: dir.path)
+        else { return }
+        do {
+            try FileManager.default.removeItem(at: dir)
+        } catch {
+            StoreOpener.logFailure("in-memory blobs removal failed", error)
+        }
+    }
 }
 
 public enum StoreOpener {
     public static let databaseName = "clips.sqlite"
     public static let repairFlagName = ".needs-repair"
     static let blobsName = "blobs"
+    static let inMemoryBlobsPrefix = "Clipjar-"
 
     public static func defaultSupportDirectory() throws -> URL {
         try FileManager.default
@@ -80,7 +99,7 @@ public enum StoreOpener {
 
     public static func openInMemory() -> OpenResult {
         let blobsURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Clipjar-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("\(inMemoryBlobsPrefix)\(UUID().uuidString)", isDirectory: true)
         do {
             try FileManager.default.createDirectory(
                 at: blobsURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]

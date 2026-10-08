@@ -12,7 +12,8 @@ import Foundation
     private let clock: @MainActor () -> Date
     private let sink: @MainActor (CapturedContent, SourceApp?, Date) -> Void
 
-    /// nil until the first poll, so the clipboard present at launch is captured.
+    /// nil until the first poll, which only records it: the clipboard present at launch may have come
+    /// from an ignored app that is no longer frontmost, so it is never read or captured.
     private var lastChangeCount: Int?
     private var frontmostAtLastTick: SourceApp?
     private var activatedSinceTick: [SourceApp] = []
@@ -76,14 +77,25 @@ import Foundation
         // Advance before filtering: content copied while paused or ignored is never captured later.
         let cc = pasteboard.changeCount
         if cc == lastChangeCount { return }
+        let isLaunchPoll = lastChangeCount == nil
         lastChangeCount = cc
+        if isLaunchPoll {
+            Log.capture.info("capture skipped: present at launch")
+            return
+        }
 
         let types = pasteboard.types()
+        let current = settings()
+        let now = clock()
+        // The declared source is pasteboard data, so it is read only once the type-only rules pass.
+        if let reason = ClipFilter.typeRejection(types: types, settings: current, now: now) {
+            Log.capture.info("capture skipped: \(String(describing: reason), privacy: .public)")
+            return
+        }
         let declaredApp = pasteboard.declaredSource().map { SourceApp(bundleID: $0, name: runningAppName($0)) }
         let candidates = ([declaredApp, prevFront] + activated + [frontNow]).compactMap { $0 }
-        let current = settings()
         let decision = ClipFilter.preflight(
-            types: types, candidates: candidates, settings: current, ownBundleID: ownBundleID, now: clock()
+            types: types, candidates: candidates, settings: current, ownBundleID: ownBundleID, now: now
         )
         if case let .reject(reason) = decision {
             Log.capture.info("capture skipped: \(String(describing: reason), privacy: .public)")

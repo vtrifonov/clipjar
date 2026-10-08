@@ -17,7 +17,8 @@ import Testing
         var captures = 0
         private(set) var watcher: ClipboardWatcher!
 
-        init() {
+        /// `primed` runs the launch poll, which only records the clipboard present at launch.
+        init(primed: Bool = true) {
             watcher = ClipboardWatcher(
                 pasteboard: pb,
                 settings: { [unowned self] in settings },
@@ -28,6 +29,7 @@ import Testing
                 sink: { [unowned self] in sinkCalls.append(($0, $1, $2)) }
             )
             watcher.onCapture = { [unowned self] in captures += 1 }
+            if primed { watcher.poll() }
         }
 
         func copyText(_ s: String, extra: Set<String> = [], declared: String? = nil) {
@@ -35,13 +37,48 @@ import Testing
         }
     }
 
-    @Test func launchCaptureOnFirstPoll() {
-        let h = Harness()
-        h.pb.copy(types: [PasteboardTypes.string], string: "Hello, Clipjar")
+    /// Its origin can't be checked against the ignore list (it may come from an ignored app that was
+    /// frontmost before launch), so the clipboard present at launch is recorded, never read or captured.
+    @Test func launchClipboardNotCaptured() {
+        let h = Harness(primed: false)
+        h.pb.copy(types: [PasteboardTypes.string], string: "Hello, Clipjar", declared: "com.example.editor")
         h.pb.changeCount = 5
         h.watcher.poll()
+        #expect(h.sinkCalls.isEmpty)
+        #expect(h.pb.totalDataReads == 0)
+        #expect(h.pb.declaredSourceReads == 0)
+        h.watcher.poll()
+        #expect(h.sinkCalls.isEmpty)
+        h.copyText("Hello again, Clipjar")
+        h.watcher.poll()
+        #expect(h.sinkCalls.map(\.0) == [CapturedContent(kind: .text, plainText: "Hello again, Clipjar")])
+    }
+
+    /// The declared source is pasteboard data: it is read only once the type-only rules accept the copy.
+    @Test(arguments: [PasteboardTypes.marker, PasteboardTypes.concealed, PasteboardTypes.transient, PasteboardTypes.autoGen])
+    func typeRejectedCopyReadsNoDeclaredSource(_ type: String) {
+        let h = Harness()
+        h.copyText("Hello, Clipjar", extra: [type], declared: "com.example.editor")
+        h.watcher.poll()
+        #expect(h.sinkCalls.isEmpty)
+        #expect(h.pb.declaredSourceReads == 0)
+    }
+
+    @Test func pausedCopyReadsNoDeclaredSource() {
+        let h = Harness()
+        h.settings.isPaused = true
+        h.copyText("Hello, Clipjar", declared: "com.example.editor")
+        h.watcher.poll()
+        #expect(h.sinkCalls.isEmpty)
+        #expect(h.pb.declaredSourceReads == 0)
+    }
+
+    @Test func acceptedTypesReadDeclaredSource() {
+        let h = Harness()
+        h.copyText("Hello, Clipjar", declared: "com.example.editor")
+        h.watcher.poll()
         #expect(h.sinkCalls.count == 1)
-        #expect(h.sinkCalls.first?.0 == CapturedContent(kind: .text, plainText: "Hello, Clipjar"))
+        #expect(h.pb.declaredSourceReads > 0)
     }
 
     @Test func noChangeNoSink() {

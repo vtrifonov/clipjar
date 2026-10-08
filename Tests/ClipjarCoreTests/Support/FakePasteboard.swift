@@ -1,7 +1,8 @@
 import Foundation
 @testable import ClipjarCore
 
-/// In-memory pasteboard that counts content reads. `types()` and `declaredSource()` are metadata and not counted.
+/// In-memory pasteboard that counts content reads. `types()` is metadata and not counted; `declaredSource()`
+/// reads are counted separately in `declaredSourceReads`.
 @MainActor final class FakePasteboard: PasteboardReading, PasteboardWriting {
     var changeCount = 0
     var typeSet: Set<String> = []
@@ -35,7 +36,12 @@ import Foundation
 
     func types() -> Set<String> { typeSet }
 
-    func declaredSource() -> String? { declared }
+    private(set) var declaredSourceReads = 0
+
+    func declaredSource() -> String? {
+        declaredSourceReads += 1
+        return declared
+    }
 
     func fileURLs() -> [URL] {
         reads[PasteboardTypes.fileURL, default: 0] += 1

@@ -177,7 +177,7 @@ are `swift build` + full `swift test` (+ manual in Task 49).
 | R24 | 19 | oversize tests in `ClipReaderTests` |
 | R25 | 21 | `SystemPasteboardTests` |
 | R26, R27 | 18 | `ClipFilterTests` |
-| R28, R29 | 22 | `startPollsImmediately`, `launchCaptureOnFirstPoll`, `pausedContentNotCapturedAfterResume` |
+| R28, R29 | 22 | `startPollsImmediately`, `launchClipboardNotCaptured`, `pausedContentNotCapturedAfterResume` |
 | R30 | 23, 45 | `itemsBufferedBeforeStartAreIngestedInOrder` |
 | R31 | 8, 9, 10 | single-transaction tests, `transactionFailureRemovesOnlyNewFiles`, `pruneErrorDoesNotFailIngest` |
 | R32 | 10, 34, 45 | `ClipStorePruneTests`, `openPrunesBeforeFirstRows` |

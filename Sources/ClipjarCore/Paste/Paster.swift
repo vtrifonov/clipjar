@@ -41,6 +41,8 @@ public enum PasteOutcome: Equatable, Sendable {
     private let apps: AppActivating
     private let sleep: @Sendable (Duration) async -> Void
     private let clock: @MainActor () -> Date
+    /// Receives payload-read and recency-update errors, so corruption can be classified and flagged.
+    private let reportStoreError: @MainActor (any Error) -> Void
 
     public init(
         store: ClipStore,
@@ -49,7 +51,8 @@ public enum PasteOutcome: Equatable, Sendable {
         keys: KeyEventPosting,
         apps: AppActivating,
         sleep: @escaping @Sendable (Duration) async -> Void,
-        clock: @escaping @MainActor () -> Date = Date.init
+        clock: @escaping @MainActor () -> Date = Date.init,
+        reportStoreError: @escaping @MainActor (any Error) -> Void = { _ in }
     ) {
         self.store = store
         self.pasteboard = pasteboard
@@ -58,6 +61,7 @@ public enum PasteOutcome: Equatable, Sendable {
         self.apps = apps
         self.sleep = sleep
         self.clock = clock
+        self.reportStoreError = reportStoreError
     }
 
     public func perform(
@@ -77,6 +81,7 @@ public enum PasteOutcome: Equatable, Sendable {
         } catch {
             let e = error as NSError
             Log.paste.error("payload read failed: \(e.domain, privacy: .public) \(e.code, privacy: .public)")
+            reportStoreError(error)
             apps.beep()
             return .copiedOnly(.userRequested)
         }
@@ -87,12 +92,14 @@ public enum PasteOutcome: Equatable, Sendable {
         // Recency update is fire-and-forget; its failure never changes the outcome.
         let store = self.store
         let now = clock()
+        let report = reportStoreError
         Task {
             do {
                 try await store.touch(id: clipID, at: now)
             } catch {
                 let e = error as NSError
                 Log.paste.error("touch failed: \(e.domain, privacy: .public) \(e.code, privacy: .public)")
+                report(error)
             }
         }
 

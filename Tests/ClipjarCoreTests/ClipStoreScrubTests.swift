@@ -194,6 +194,52 @@ import Testing
         #expect(try !secretResidue(in: fx.dir.url))
     }
 
+    /// Prunes that delete nothing (panel opens, wakes, ingests under the limit) must still complete a
+    /// deferred scrub once the hour has passed.
+    @Test(arguments: [HistoryLimit.l200, .unlimited])
+    func deferredScrubRunsOnLaterPruneThatDeletesNothing(_ laterLimit: HistoryLimit) async throws {
+        let fx = try makeStore(.filePool)
+        await fx.store.configure(limit: .l200, maxAgeDays: 0)
+        try seed(fx.writer, olderItems(200))
+        try await fx.store.ingest(text("First new item"), source: nil, at: t0)
+        try seed(fx.writer, [Clip.make(secret, at: t0 - 5000)])
+        try await fx.store.ingest(text("Second new item"), source: nil, at: t0 + 60)
+        #expect(await fx.store.scrubPending == true)
+        #expect(try await fx.store.prune(limit: laterLimit, maxAgeDays: 0, now: t0 + 600) == 0)
+        #expect(await fx.store.scrubPending == true)
+        #expect(try await fx.store.prune(limit: laterLimit, maxAgeDays: 0, now: t0 + 3700) == 0)
+        #expect(await fx.store.scrubPending == false)
+        #expect(await fx.store.optimizeRunCount == 2)
+        #expect(try !secretResidue(in: fx.dir.url))
+    }
+
+    /// A user deletion's scrub that hit a busy checkpoint is retried by the next store write, without
+    /// waiting for the hourly prune scrub.
+    @Test func busyUserDeleteScrubRetriedOnNextIngest() async throws {
+        let fx = try makeStore(.filePool)
+        await fx.store.configure(limit: .l200, maxAgeDays: 0)
+        try seed(fx.writer, olderItems(200))
+        // A prune scrub at t0 starts the hourly window, so only the user-delete retry can run at t0 + 10.
+        try await fx.store.ingest(text("First new item"), source: nil, at: t0)
+        #expect(await fx.store.optimizeRunCount == 1)
+        let secretID = id(of: try await fx.store.ingest(text(secret), source: nil, at: t0 + 1))
+        var config = Schema.configuration()
+        config.allowsUnsafeTransactions = true
+        config.busyMode = .immediateError
+        let reader = try DatabaseQueue(path: fx.dir.url.appendingPathComponent("clips.sqlite").path, configuration: config)
+        try reader.inDatabase { db in
+            try db.execute(sql: "BEGIN")
+            _ = try Int64.fetchAll(db, sql: "SELECT id FROM clip")
+        }
+        try await fx.store.delete(id: secretID)
+        #expect(await fx.store.scrubPending == true)
+        try reader.inDatabase { try $0.execute(sql: "COMMIT") }
+        try reader.close()
+        try await fx.store.ingest(text("Next item"), source: nil, at: t0 + 10)
+        #expect(await fx.store.scrubPending == false)
+        #expect(try !secretResidue(in: fx.dir.url))
+    }
+
     @Test(arguments: Backend.allCases)
     func hourlyScrubSurvivesClockGoingBack(_ backend: Backend) async throws {
         let fx = try makeStore(backend)

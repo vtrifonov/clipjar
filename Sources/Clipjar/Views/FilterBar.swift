@@ -14,10 +14,12 @@ struct FilterBar: View {
                 .accessibilityHidden(true)
             chip(.pinned)
             Spacer(minLength: 8)
-            Text(DisplayFormat.countLabel(model.matchCount))
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
+            if !model.isMatchCountPending {
+                Text(DisplayFormat.countLabel(model.matchCount))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
         }
         .padding(.horizontal, 12)
         .frame(height: 36)

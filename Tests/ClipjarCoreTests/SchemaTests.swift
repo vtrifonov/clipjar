@@ -113,4 +113,14 @@ import Testing
         let value = try w.read { try Int.fetchOne($0, sql: "PRAGMA secure_delete") }
         #expect(value == 1)
     }
+
+    /// Sorts and FTS merges never spill clip text to unscrubbed temp files outside the support directory.
+    @Test(arguments: Backend.allCases)
+    func tempStoreIsMemory(_ backend: Backend) throws {
+        let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
+        let w = try makeWriter(backend, in: dir)
+        #expect(try w.read { try Int.fetchOne($0, sql: "PRAGMA temp_store") } == 2)
+        #expect(try w.write { try Int.fetchOne($0, sql: "PRAGMA temp_store") } == 2)
+    }
 }

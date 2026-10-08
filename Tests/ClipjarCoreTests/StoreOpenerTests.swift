@@ -84,6 +84,7 @@ import Testing
         let support = supportURL(dir)
         try Data("synthetic".utf8).write(to: support)
         let r = await StoreOpener.open(supportDirectory: support)
+        defer { r.removeTemporaryBlobs() }
         #expect(r.storageUnavailable)
         #expect(r.supportDirectory == nil)
         let result = try await r.store.ingest(text("Hello, Clipjar"), source: nil, at: t0)
@@ -93,8 +94,28 @@ import Testing
         }
     }
 
+    /// Images copied during an in-memory session must not outlive it in `$TMPDIR`.
+    @Test func inMemoryTemporaryBlobsRemoved() async throws {
+        let r = StoreOpener.openInMemory()
+        try await r.store.ingest(image(TestImages.png(width: 40, height: 30)), source: nil, at: t0)
+        let blobs = r.store.blobsDirectory
+        #expect(try !FileManager.default.contentsOfDirectory(atPath: blobs.path).isEmpty)
+        r.removeTemporaryBlobs()
+        #expect(!FileManager.default.fileExists(atPath: blobs.path))
+        r.removeTemporaryBlobs()
+    }
+
+    @Test func persistentBlobsNotRemoved() async throws {
+        let dir = try TempDir()
+        let r = await StoreOpener.open(supportDirectory: supportURL(dir))
+        #expect(!r.storageUnavailable)
+        r.removeTemporaryBlobs()
+        #expect(FileManager.default.fileExists(atPath: r.store.blobsDirectory.path))
+    }
+
     @Test func openInMemoryWorks() async throws {
         let r = StoreOpener.openInMemory()
+        defer { r.removeTemporaryBlobs() }
         #expect(r.storageUnavailable)
         #expect(r.supportDirectory == nil)
         let png = TestImages.png(width: 40, height: 30)

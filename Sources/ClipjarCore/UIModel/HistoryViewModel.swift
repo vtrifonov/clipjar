@@ -29,6 +29,9 @@ import Observation
     public private(set) var selectedClip: Clip?
     /// Matching clips, not counting rows hidden as deleted.
     public private(set) var matchCount = 0
+    /// True from an open until its own count arrives; the view hides the count label meanwhile, since
+    /// `matchCount` may still belong to the previous open's query or filter.
+    public private(set) var isMatchCountPending = false
     public private(set) var allCount = 0
     public private(set) var banners: [Banner] = []
     public private(set) var toast: Toast?
@@ -175,6 +178,7 @@ import Observation
         matchTask?.cancel()
         isPreparingOpen = true
         awaitingOpenRows = true
+        isMatchCountPending = true
         query = ""
         filter = .all
         limit = Self.pageSize
@@ -386,6 +390,7 @@ import Observation
         matchTask = observe(store.countObservation(q)) { [weak self] in
             self?.fetchedMatchCount = $0
             self?.updateMatchCount()
+            self?.isMatchCountPending = false
         }
     }
 

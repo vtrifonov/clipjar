@@ -27,3 +27,31 @@ public enum StoreErrorClassifier {
         return .corrupt
     }
 }
+
+/// Classifies store errors (writing the repair flag for corruption) and forwards the resulting event.
+/// App call sites that would otherwise drop a store error with `try?` use `reportIfStoreError` instead.
+@MainActor public struct StoreErrorReporter {
+    public let supportDirectory: URL?
+    private let onEvent: @MainActor (StoreEvent) -> Void
+
+    /// `supportDirectory` is nil for the in-memory store, which has no repair flag.
+    public init(supportDirectory: URL?, onEvent: @escaping @MainActor (StoreEvent) -> Void) {
+        self.supportDirectory = supportDirectory
+        self.onEvent = onEvent
+    }
+
+    public func report(_ error: any Error) {
+        onEvent(StoreErrorClassifier.classify(error, supportDirectory: supportDirectory))
+    }
+
+    /// The result of `body`, or nil after reporting the error it threw.
+    @discardableResult
+    public func reportIfStoreError<T>(_ body: () async throws -> T) async -> T? {
+        do {
+            return try await body()
+        } catch {
+            report(error)
+            return nil
+        }
+    }
+}
