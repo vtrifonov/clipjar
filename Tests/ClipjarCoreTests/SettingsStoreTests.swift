@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import os
@@ -12,6 +13,52 @@ import Testing
     private func makeSettings(now: Date = t0) -> SettingsStore {
         let scheduler = scheduler
         return SettingsStore(defaults: defaults, clock: { now }, scheduler: { scheduler.schedule($0, $1) })
+    }
+
+    private func makeSettings(clock: TestClock, center: NotificationCenter) -> SettingsStore {
+        let scheduler = scheduler
+        return SettingsStore(
+            defaults: defaults, clock: { clock.now }, scheduler: { scheduler.schedule($0, $1) },
+            wakeNotifications: center
+        )
+    }
+
+    /// The run-loop timer doesn't advance during sleep, so wake re-checks the pause against the clock.
+    @Test func wakeAfterPauseExpiryResumes() async {
+        let clock = TestClock()
+        let center = NotificationCenter()
+        let s = makeSettings(clock: clock, center: center)
+        s.pause(for: 900)
+        clock.now = t0 + 3600
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        #expect(await eventually { !s.isPaused })
+        #expect(s.pausedUntil == nil)
+        #expect(scheduler.live.isEmpty)
+    }
+
+    @Test func wakeBeforePauseExpiryRearms() async {
+        let clock = TestClock()
+        let center = NotificationCenter()
+        let s = makeSettings(clock: clock, center: center)
+        s.pause(for: 900)
+        clock.now = t0 + 600
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        #expect(await eventually { scheduler.entries.count == 2 })
+        #expect(s.isPaused)
+        #expect(scheduler.live.count == 1)
+        #expect(scheduler.live.first?.date == t0 + 900)
+    }
+
+    @Test func wakeWithIndefinitePauseKeepsPause() async throws {
+        let clock = TestClock()
+        let center = NotificationCenter()
+        let s = makeSettings(clock: clock, center: center)
+        s.pause(for: nil)
+        clock.now = t0 + 99_999
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(s.isPaused)
+        #expect(scheduler.entries.isEmpty)
     }
 
     @Test func defaultValues() {

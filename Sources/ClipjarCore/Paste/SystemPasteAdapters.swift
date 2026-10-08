@@ -20,13 +20,16 @@ import ApplicationServices
 
     public init() {}
 
+    /// Both events are created before either is posted, so a failed key-up never leaves ⌘V held down.
     public func postCommandV() {
         let source = CGEventSource(stateID: .combinedSessionState)
-        for keyDown in [true, false] {
-            guard let event = CGEvent(keyboardEventSource: source, virtualKey: Self.vKey, keyDown: keyDown) else {
-                Log.paste.error("key event creation failed")
-                return
-            }
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: Self.vKey, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: Self.vKey, keyDown: false)
+        else {
+            Log.paste.error("key event creation failed")
+            return
+        }
+        for event in [down, up] {
             event.flags = .maskCommand
             event.post(tap: .cghidEventTap)
         }

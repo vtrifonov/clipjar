@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import Observation
@@ -21,6 +22,7 @@ import Observation
     @ObservationIgnored private let clock: @MainActor () -> Date
     @ObservationIgnored private let scheduler: MainScheduler
     @ObservationIgnored private var pauseTimer: (any Cancellable)?
+    @ObservationIgnored private var wakeSubscription: AnyCancellable?
 
     public var historyLimit: HistoryLimit {
         didSet { defaults.set(historyLimit.rawValue, forKey: Key.historyLimit) }
@@ -56,10 +58,12 @@ import Observation
         }
     }
 
+    /// `wakeNotifications` delivers `NSWorkspace.didWakeNotification`; injectable for tests.
     public init(
         defaults: UserDefaults,
         clock: @escaping @MainActor () -> Date = Date.init,
-        scheduler: @escaping MainScheduler = Schedulers.timer
+        scheduler: @escaping MainScheduler = Schedulers.timer,
+        wakeNotifications: NotificationCenter = NSWorkspace.shared.notificationCenter
     ) {
         self.defaults = defaults
         self.clock = clock
@@ -74,12 +78,24 @@ import Observation
         isPaused = defaults.bool(forKey: Key.isPaused)
         pausedUntil = (defaults.object(forKey: Key.pausedUntil) as? Double).map(Date.init(timeIntervalSince1970:))
 
-        if isPaused, let until = pausedUntil {
-            if until <= clock() {
-                resume()
-            } else {
-                armPauseTimer(until)
+        reconcilePause()
+        // AnyCancellable cancels itself when the store is released, so no deinit is needed.
+        wakeSubscription = wakeNotifications.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.reconcilePause() }
             }
+    }
+
+    /// Ends a timed pause whose time has passed, otherwise re-arms its timer. Run at launch and on wake,
+    /// because the run-loop timer does not advance while the Mac sleeps.
+    public func reconcilePause() {
+        guard isPaused, let until = pausedUntil else { return }
+        if until <= clock() {
+            resume()
+        } else {
+            pauseTimer?.cancel()
+            armPauseTimer(until)
         }
     }
 

@@ -35,6 +35,7 @@ import Testing
         Case(36, [], .activate(copyOnly: false)),
         Case(76, [], .activate(copyOnly: false)),
         Case(36, [.option], .activate(copyOnly: true)),
+        Case(76, [.option], .activate(copyOnly: true)),
         Case(18, [.command, .option], nil),
         Case(35, [.command], .togglePin),
         Case(51, [.command], .delete),

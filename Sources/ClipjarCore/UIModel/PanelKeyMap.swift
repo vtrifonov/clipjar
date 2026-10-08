@@ -19,7 +19,7 @@ public enum PanelKeyMap {
         case (116, []): return .pageUp
         case (121, []): return .pageDown
         case (36, []), (76, []): return .activate(copyOnly: false)
-        case (36, [.option]): return .activate(copyOnly: true)
+        case (36, [.option]), (76, [.option]): return .activate(copyOnly: true)
         case (35, [.command]): return .togglePin
         case (51, [.command]): return .delete
         case (6, [.command]): return deleteToastVisible ? .undoDelete : nil
