@@ -89,7 +89,7 @@ private struct GeneralSection: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Toggle("Launch at login", isOn: Binding(get: { launchAtLogin }, set: setLaunchAtLogin))
+                Toggle("Launch at login", isOn: Binding(get: { launchAtLogin }, set: { setLaunchAtLogin($0) }))
                 if let loginError {
                     Caption(loginError)
                 } else if loginStatus == .requiresApproval {
