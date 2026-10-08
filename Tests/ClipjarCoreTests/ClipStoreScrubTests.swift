@@ -98,6 +98,21 @@ import Testing
     }
 
     @Test(arguments: Backend.allCases)
+    func userDeleteScrubFailureDoesNotThrow(_ backend: Backend) async throws {
+        let fx = try makeStore(backend)
+        let clipID = id(of: try await fx.store.ingest(text("Hello, Clipjar"), source: nil, at: t0))
+        await fx.store.setScrubFaultForTesting(CocoaError(.fileWriteUnknown))
+        try await fx.store.delete(id: clipID)
+        #expect(try await fx.store.clip(id: clipID) == nil)
+        #expect(await fx.store.scrubPending == true)
+        #expect(await fx.store.optimizeRunCount == 0)
+        await fx.store.setScrubFaultForTesting(nil)
+        try await fx.store.scrubIfPending()
+        #expect(await fx.store.scrubPending == false)
+        #expect(await fx.store.optimizeRunCount == 1)
+    }
+
+    @Test(arguments: Backend.allCases)
     func hourlyScrubRuns(_ backend: Backend) async throws {
         let fx = try makeStore(backend)
         await fx.store.configure(limit: .l200, maxAgeDays: 0)

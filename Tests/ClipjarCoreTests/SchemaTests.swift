@@ -7,6 +7,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func migratorCreatesSchema(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try makeWriter(backend, in: dir)
         try Schema.migrator.migrate(w)
         let (hasClip, hasFTS) = try w.read { db in
@@ -19,6 +20,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func migrationsIdempotent(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try makeWriter(backend, in: dir)
         try Schema.migrator.migrate(w)
         try Schema.migrator.migrate(w)
@@ -29,6 +31,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func clipRoundTrip(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try makeWriter(backend, in: dir)
         try Schema.migrator.migrate(w)
         var clip = Clip.make("Hello, Clipjar")
@@ -47,6 +50,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func ftsTriggersTrackInsertUpdateDelete(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try makeWriter(backend, in: dir)
         try Schema.migrator.migrate(w)
         let id = try seed(w, [Clip.make("hello clipjar")])[0]
@@ -72,6 +76,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func contentHashIsUnique(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try makeWriter(backend, in: dir)
         try Schema.migrator.migrate(w)
         try seed(w, [Clip.make("Hello, Clipjar")])
@@ -86,6 +91,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func kindCheckRejectsUnknown(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try makeWriter(backend, in: dir)
         try Schema.migrator.migrate(w)
         #expect(throws: DatabaseError.self) {
@@ -101,6 +107,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func secureDeleteIsOn(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try makeWriter(backend, in: dir)
         try Schema.migrator.migrate(w)
         let value = try w.read { try Int.fetchOne($0, sql: "PRAGMA secure_delete") }

@@ -10,10 +10,16 @@ public actor ClipStore {
     var limit: HistoryLimit = .l1000
     var maxAgeDays = 0
     private(set) var optimizeRunCount = 0
-    /// Set when a prune deleted rows whose bytes have not been scrubbed yet.
+    /// Set when deleted rows' bytes have not been scrubbed yet.
     private(set) var scrubPending = false
     /// Set only by prune-driven scrubs; user deletions take no `now`.
     private var lastScrubAt: Date?
+    /// Test seam: when set, every scrub throws this before touching the database.
+    private var scrubFault: (any Error)?
+
+    func setScrubFaultForTesting(_ error: (any Error)?) {
+        scrubFault = error
+    }
 
     /// Runs `Schema.migrator`.
     public init(writer: any DatabaseWriter, blobsDirectory: URL) throws {
@@ -147,9 +153,20 @@ extension ClipStore {
         guard deleted.count > 0 else { return 0 }
         scrubPending = true
         if lastScrubAt.map({ now.timeIntervalSince($0) >= 3600 }) ?? true {
-            try scrub(.optimize, at: now)
+            scrubAfterCommittedDelete(.optimize, at: now)
         }
         return deleted.count
+    }
+
+    /// The deletion already committed, so a scrub failure is logged and left pending rather than thrown.
+    private func scrubAfterCommittedDelete(_ command: FTSScrub, at now: Date?) {
+        do {
+            try scrub(command, at: now)
+        } catch {
+            scrubPending = true
+            let e = error as NSError
+            Log.store.error("scrub failed: \(e.domain, privacy: .public) \(e.code, privacy: .public)")
+        }
     }
 
     /// Completes a deferred prune scrub; called on app termination.
@@ -162,6 +179,7 @@ extension ClipStore {
     /// Rewrites the FTS index without deleted entries, then truncates the WAL so that, with
     /// `secure_delete`, no deleted bytes remain in `clips.sqlite*`.
     private func scrub(_ command: FTSScrub, at now: Date?) throws {
+        if let scrubFault { throw scrubFault }
         try writer.write { db in
             try db.execute(sql: "INSERT INTO clip_fts(clip_fts) VALUES(?)", arguments: [command.rawValue])
         }
@@ -264,7 +282,7 @@ extension ClipStore {
     private func deleteCommitted(where condition: SQL, scrub command: FTSScrub) throws -> Int {
         let deleted = try writer.write { db in try Self.deleteRows(db, where: condition) }
         blobs.remove(deleted.blobNames)
-        if deleted.count > 0 { try scrub(command, at: nil) }
+        if deleted.count > 0 { scrubAfterCommittedDelete(command, at: nil) }
         return deleted.count
     }
 }

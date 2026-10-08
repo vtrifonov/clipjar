@@ -34,7 +34,7 @@ public enum TextHeuristics {
     }
 
     public static func linkDomain(_ s: String) -> String? {
-        guard let host = url(from: s)?.host else { return nil }
+        guard let host = url(from: s)?.host?.lowercased() else { return nil }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 

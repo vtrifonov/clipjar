@@ -43,6 +43,8 @@ import Testing
         #expect(TextHeuristics.linkDomain("https://www.example.com/a") == "example.com")
         #expect(TextHeuristics.linkDomain("www.example.com") == "example.com")
         #expect(TextHeuristics.linkDomain("not a link") == nil)
+        #expect(TextHeuristics.linkDomain("https://WWW.Example.com/a") == "example.com")
+        #expect(TextHeuristics.linkDomain("WWW.Example.com") == "example.com")
     }
 
     @Test(arguments: [

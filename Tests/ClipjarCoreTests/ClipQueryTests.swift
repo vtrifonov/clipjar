@@ -17,6 +17,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func substringMatchesMidWord(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try migratedWriter(backend, dir)
         let seeded = try seed(w, [Clip.make("Hello, Clipjar"), Clip.make("Something else")])
         #expect(try ids(w, ClipQuery(terms: ["lipj"])) == [seeded[0]])
@@ -25,6 +26,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func caseAndDiacriticFolding(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try migratedWriter(backend, dir)
         let seeded = try seed(w, [Clip.make("Café au lait"), Clip.make("Äpfel")])
         #expect(try ids(w, ClipQuery(terms: ["cafe"])) == [seeded[0]])
@@ -36,6 +38,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func shortTermUsesEscapedLike(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try migratedWriter(backend, dir)
         let seeded = try seed(w, [Clip.make("xaby"), Clip.make("100% done"), Clip.make("a_b"), Clip.make("axb")])
         #expect(try ids(w, ClipQuery(terms: ["ab"])) == [seeded[0]])
@@ -44,8 +47,22 @@ import Testing
     }
 
     @Test(arguments: Backend.allCases)
+    func shortTermEscapesBackslashAndWildcards(_ backend: Backend) throws {
+        let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
+        let w = try migratedWriter(backend, dir)
+        let seeded = try seed(w, [
+            Clip.make(#"a\%b"#), Clip.make("50% off"), Clip.make(#"a\b"#), Clip.make(#"x\_y"#), Clip.make("x_y"),
+        ])
+        #expect(try ids(w, ClipQuery(terms: [#"\%"#])) == [seeded[0]])
+        #expect(try ids(w, ClipQuery(terms: [#"\_"#])) == [seeded[3]])
+        #expect(try Set(ids(w, ClipQuery(terms: [#"\"#]))) == [seeded[0], seeded[2], seeded[3]])
+    }
+
+    @Test(arguments: Backend.allCases)
     func termsAreAnded(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try migratedWriter(backend, dir)
         let seeded = try seed(w, [Clip.make("red apple"), Clip.make("red car")])
         #expect(try ids(w, ClipQuery(terms: ["red", "apple"])) == [seeded[0]])
@@ -54,6 +71,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func appsAreOred(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try migratedWriter(backend, dir)
         let seeded = try seed(w, [
             Clip.make("one", app: "TextEdit", bundleID: "com.apple.TextEdit"),
@@ -67,6 +85,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func kindsFilter(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try migratedWriter(backend, dir)
         let seeded = try seed(w, [Clip.make("plain words"), Clip.make("https://example.com", kind: .link)])
         #expect(try ids(w, ClipQuery(kinds: [.link])) == [seeded[1]])
@@ -78,6 +97,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func pinnedOnly(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try migratedWriter(backend, dir)
         let seeded = try seed(w, [Clip.make("loose"), Clip.make("fixed", pinned: true)])
         #expect(try ids(w, ClipQuery(pinnedOnly: true)) == [seeded[1]])
@@ -86,6 +106,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func orderIsRecencyThenIdNotPinned(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try migratedWriter(backend, dir)
         let later = t0.addingTimeInterval(60)
         let seeded = try seed(w, [
@@ -99,6 +120,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func limitAndCount(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try migratedWriter(backend, dir)
         let clips = (0..<5).map { Clip.make("clip number \($0)", at: t0.addingTimeInterval(Double($0))) }
         let seeded = try seed(w, clips)
@@ -110,6 +132,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func fileCountProjected(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try migratedWriter(backend, dir)
         var files = Clip.make("/tmp/a.txt\n/tmp/b.txt\n/tmp/c.txt", kind: .file)
         files.fileURLs = ["file:///tmp/a.txt", "file:///tmp/b.txt", "file:///tmp/c.txt"]
@@ -122,6 +145,7 @@ import Testing
     @Test(arguments: Backend.allCases)
     func ftsSyntaxIsLiteral(_ backend: Backend) throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let w = try migratedWriter(backend, dir)
         let seeded = try seed(w, [Clip.make("say (xyz) now")])
         for term in ["a\"b\"c", "NEAR(x", "*foo*", "-bar", "(xyz)", "OR", "AND"] {
