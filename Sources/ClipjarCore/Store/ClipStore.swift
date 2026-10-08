@@ -9,6 +9,11 @@ public actor ClipStore {
     let thumbnailer: @Sendable (Data) -> Data?
     var limit: HistoryLimit = .l1000
     var maxAgeDays = 0
+    private(set) var optimizeRunCount = 0
+    /// Set when a prune deleted rows whose bytes have not been scrubbed yet.
+    private(set) var scrubPending = false
+    /// Set only by prune-driven scrubs; user deletions take no `now`.
+    private var lastScrubAt: Date?
 
     /// Runs `Schema.migrator`.
     public init(writer: any DatabaseWriter, blobsDirectory: URL) throws {
@@ -127,14 +132,45 @@ extension ClipStore {
     }
 
     /// Deletes unpinned rows older than `maxAgeDays` or beyond `limit`, then removes their blob files.
+    /// The full scrub is deferred to at most once per hour; `scrubIfPending` completes it.
     @discardableResult
     public func prune(limit: HistoryLimit, maxAgeDays: Int, now: Date) throws -> Int {
         guard let candidates = Self.pruneCandidates(limit: limit, maxAgeDays: maxAgeDays, now: now) else { return 0 }
         let deleted = try writer.write { db in
-            try Self.deleteRows(db, where: "id IN (\(literal: candidates))")
+            let deleted = try Self.deleteRows(db, where: "id IN (\(literal: candidates))")
+            if deleted.count > 0 {
+                try db.execute(sql: "INSERT INTO clip_fts(clip_fts, rank) VALUES('merge', 16)")
+            }
+            return deleted
         }
         blobs.remove(deleted.blobNames)
+        guard deleted.count > 0 else { return 0 }
+        scrubPending = true
+        if lastScrubAt.map({ now.timeIntervalSince($0) >= 3600 }) ?? true {
+            try scrub(.optimize, at: now)
+        }
         return deleted.count
+    }
+
+    /// Completes a deferred prune scrub; called on app termination.
+    public func scrubIfPending() throws {
+        if scrubPending { try scrub(.optimize, at: nil) }
+    }
+
+    enum FTSScrub: String { case optimize, rebuild }
+
+    /// Rewrites the FTS index without deleted entries, then truncates the WAL so that, with
+    /// `secure_delete`, no deleted bytes remain in `clips.sqlite*`.
+    private func scrub(_ command: FTSScrub, at now: Date?) throws {
+        try writer.write { db in
+            try db.execute(sql: "INSERT INTO clip_fts(clip_fts) VALUES(?)", arguments: [command.rawValue])
+        }
+        try writer.writeWithoutTransaction { db in
+            try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+        }
+        optimizeRunCount += 1
+        scrubPending = false
+        if let now { lastScrubAt = now }
     }
 
     /// Read-only: how many rows `prune` would delete.
@@ -189,19 +225,19 @@ extension ClipStore {
     }
 
     public func delete(id: Int64) throws {
-        try deleteCommitted(where: "id = \(id)")
+        try deleteCommitted(where: "id = \(id)", scrub: .optimize)
     }
 
     /// Deletes only if the clip was not re-copied since `ifLastCopiedAt`; true iff a row was deleted.
     @discardableResult
     public func delete(id: Int64, ifLastCopiedAt: Date) throws -> Bool {
-        try deleteCommitted(where: "id = \(id) AND lastCopiedAt = \(ifLastCopiedAt)") > 0
+        try deleteCommitted(where: "id = \(id) AND lastCopiedAt = \(ifLastCopiedAt)", scrub: .optimize) > 0
     }
 
     /// Deletes every unpinned clip, or every clip when `keepPinned` is false.
     @discardableResult
     public func clearAll(keepPinned: Bool) throws -> Int {
-        try deleteCommitted(where: keepPinned ? "isPinned = 0" : "1")
+        try deleteCommitted(where: keepPinned ? "isPinned = 0" : "1", scrub: .rebuild)
     }
 
     /// nil for an unknown id, or for an image whose blob file is missing.
@@ -222,10 +258,13 @@ extension ClipStore {
         try reader.read { try Clip.fetchOne($0, key: id) }
     }
 
-    /// Deletes rows in one transaction and removes their blob files after it commits.
-    private func deleteCommitted(where condition: SQL) throws -> Int {
+    /// User deletion: deletes rows in one transaction, removes their blob files after it commits,
+    /// then scrubs immediately if anything was deleted.
+    @discardableResult
+    private func deleteCommitted(where condition: SQL, scrub command: FTSScrub) throws -> Int {
         let deleted = try writer.write { db in try Self.deleteRows(db, where: condition) }
         blobs.remove(deleted.blobNames)
+        if deleted.count > 0 { try scrub(command, at: nil) }
         return deleted.count
     }
 }
