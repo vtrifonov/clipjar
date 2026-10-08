@@ -89,25 +89,27 @@ final class PanelController: NSObject, NSWindowDelegate {
         model.prepareForOpen()
         if let frame { panel.setFrame(frame, display: false) }
 
-        let animate = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        panel.alphaValue = animate ? 0 : 1
+        // Fades run on the content layer, never on the window's alpha: window alpha animations don't run
+        // while Clipjar is an inactive accessory app, which left the panel on screen at alpha 0. The layer's
+        // model values stay at rest, so a dropped animation still leaves the panel fully visible.
+        let layer = panel.contentView?.layer
+        layer?.removeAnimation(forKey: "close")
+        panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
         installMonitors()
-        guard animate else { return }
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let layer else { return }
 
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.openDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1
-        }
-        if let layer = panel.contentView?.layer {
-            let grow = CABasicAnimation(keyPath: "transform")
-            grow.fromValue = NSValue(caTransform3D: Self.topAnchoredScale(Self.openScale, in: layer.bounds))
-            grow.toValue = NSValue(caTransform3D: CATransform3DIdentity)
-            grow.duration = Self.openDuration
-            grow.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            layer.add(grow, forKey: "open")
-        }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        let grow = CABasicAnimation(keyPath: "transform")
+        grow.fromValue = NSValue(caTransform3D: Self.topAnchoredScale(Self.openScale, in: layer.bounds))
+        grow.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+        let open = CAAnimationGroup()
+        open.animations = [fade, grow]
+        open.duration = Self.openDuration
+        open.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(open, forKey: "open")
     }
 
     /// Fades out. If Clipjar is the active app, focus goes back to the target, or to the last other app when
@@ -120,13 +122,23 @@ final class PanelController: NSObject, NSWindowDelegate {
         let generation = showGeneration
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             finishHide(generation)
-        } else {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = Self.closeDuration
-                panel.animator().alphaValue = 0
-            } completionHandler: { [weak self] in
+        } else if let layer = panel.contentView?.layer {
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = layer.presentation()?.opacity ?? 1
+            fade.toValue = 0
+            fade.duration = Self.closeDuration
+            // Holds at 0 until finishHide orders the panel out; show() removes it on a reopen.
+            fade.fillMode = .forwards
+            fade.isRemovedOnCompletion = false
+            CATransaction.begin()
+            CATransaction.setCompletionBlock { [weak self] in
                 MainActor.assumeIsolated { self?.finishHide(generation) }
             }
+            layer.removeAnimation(forKey: "open")
+            layer.add(fade, forKey: "close")
+            CATransaction.commit()
+        } else {
+            finishHide(generation)
         }
         if NSApp.isActive { returnFocus(to: target) }
     }
@@ -134,7 +146,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func finishHide(_ generation: Int) {
         guard generation == showGeneration else { return }
         panel.orderOut(nil)
-        panel.alphaValue = 1
+        panel.contentView?.layer?.removeAnimation(forKey: "close")
     }
 
     /// Paste/copy path: no fade, and returns once the panel has given up key status.
@@ -146,7 +158,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         model.commitPendingDeletion()
         removeMonitors()
         panel.orderOut(nil)
-        panel.alphaValue = 1
+        panel.contentView?.layer?.removeAllAnimations()
         let deadline = ContinuousClock.now + .milliseconds(100)
         while panel.isKeyWindow, ContinuousClock.now < deadline {
             await Task.yield()
