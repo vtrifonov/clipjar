@@ -45,7 +45,10 @@ struct HistoryView: View {
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: model.toast)
-        .frame(width: PanelPlacement.size.width, height: PanelPlacement.size.height)
+        .frame(
+            minWidth: PanelPlacement.minSize.width, maxWidth: .infinity,
+            minHeight: PanelPlacement.minSize.height, maxHeight: .infinity
+        )
         .background(chrome)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(

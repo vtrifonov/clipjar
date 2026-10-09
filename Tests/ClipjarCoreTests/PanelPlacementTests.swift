@@ -50,6 +50,34 @@ import Testing
         expectOrigin(PanelPlacement.nearCursor(CGPoint(x: -960, y: 500), visibleFrame: screen), -1320, 24)
     }
 
+    @Test func fittedSizeDefaultsWhenNothingStored() {
+        #expect(PanelPlacement.fittedSize(nil, visibleFrame: visible) == PanelPlacement.size)
+    }
+
+    @Test func fittedSizeKeepsStoredSize() {
+        let stored = CGSize(width: 1000, height: 640)
+        #expect(PanelPlacement.fittedSize(stored, visibleFrame: visible) == stored)
+    }
+
+    @Test func fittedSizeRaisesToMinimum() {
+        let fitted = PanelPlacement.fittedSize(CGSize(width: 100, height: 50), visibleFrame: visible)
+        #expect(fitted == PanelPlacement.minSize)
+    }
+
+    /// A size saved on a big display shrinks to fit a smaller one.
+    @Test func fittedSizeShrinksToScreen() {
+        let fitted = PanelPlacement.fittedSize(CGSize(width: 3000, height: 2000), visibleFrame: visible)
+        #expect(fitted == CGSize(width: 1424, height: 859))
+    }
+
+    @Test func customSizeIsPlaced() {
+        let size = CGSize(width: 1000, height: 640)
+        let frame = PanelPlacement.nearCursor(CGPoint(x: 720, y: 800), visibleFrame: visible, size: size)
+        #expect(frame.size == size)
+        #expect(frame.minX == 220)
+        #expect(frame.minY == 144)
+    }
+
     @Test func panelLargerThanScreen() {
         let small = CGRect(x: 0, y: 0, width: 600, height: 400)
         let frames = [
