@@ -243,6 +243,7 @@ private struct HistorySection: View {
 private struct PrivacySection: View {
     let settings: SettingsStore
     @State private var selection: String?
+    @FocusState private var listFocused: Bool
 
     var body: some View {
         Section("Privacy") {
@@ -257,20 +258,45 @@ private struct PrivacySection: View {
         }
 
         Section {
-            // A real List: focusable, arrow keys move the selection, ⌫ removes it, and VoiceOver sees it.
-            List(settings.ignoredBundleIDs, id: \.self, selection: $selection) { id in
-                IgnoredAppRow(bundleID: id)
-                    .accessibilityAction(named: "Stop ignoring") { remove(id) }
-            }
-            .listStyle(.bordered(alternatesRowBackgrounds: true))
-            .frame(height: 150)
-            .overlay {
-                if settings.ignoredBundleIDs.isEmpty {
-                    Text("No ignored apps").foregroundStyle(.secondary)
+            // A List nested in a grouped Form is laid out inline and clipped, so it never scrolls. An explicit
+            // ScrollView does; it stays focusable, arrow keys move the selection, ⌫ removes it.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(settings.ignoredBundleIDs.enumerated()), id: \.element) { index, id in
+                            IgnoredAppRow(bundleID: id)
+                                .padding(.horizontal, 8)
+                                .background(rowBackground(id: id, index: index))
+                                .foregroundStyle(isHighlighted(id) ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                                .environment(\.backgroundProminence, isHighlighted(id) ? .increased : .standard)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selection = id
+                                    listFocused = true
+                                }
+                                .id(id)
+                                .accessibilityAddTraits(selection == id ? [.isButton, .isSelected] : .isButton)
+                                .accessibilityAction { selection = id }
+                                .accessibilityAction(named: "Stop ignoring") { remove(id) }
+                        }
+                    }
                 }
+                .frame(height: 150)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .overlay(Rectangle().strokeBorder(Color(nsColor: .separatorColor)))
+                .overlay {
+                    if settings.ignoredBundleIDs.isEmpty {
+                        Text("No ignored apps").foregroundStyle(.secondary)
+                    }
+                }
+                .focusable()
+                .focused($listFocused)
+                .onKeyPress(.upArrow) { moveSelection(by: -1, proxy) }
+                .onKeyPress(.downArrow) { moveSelection(by: 1, proxy) }
+                .onDeleteCommand(perform: removeSelected)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Ignored apps")
             }
-            .onDeleteCommand(perform: removeSelected)
-            .accessibilityLabel("Ignored apps")
             HStack(spacing: 0) {
                 Button(action: addApps) {
                     Image(systemName: "plus").frame(width: 22, height: 18)
@@ -292,6 +318,30 @@ private struct PrivacySection: View {
         } footer: {
             Caption("Clipjar also skips anything apps mark as concealed, such as passwords. History is stored unencrypted on this Mac and never leaves it.")
         }
+    }
+
+    private func isHighlighted(_ id: String) -> Bool {
+        selection == id && listFocused
+    }
+
+    @ViewBuilder private func rowBackground(id: String, index: Int) -> some View {
+        if selection == id {
+            listFocused ? Color.accentColor : Color.secondary.opacity(0.25)
+        } else if index.isMultiple(of: 2) {
+            Color.clear
+        } else {
+            Color.primary.opacity(0.04)
+        }
+    }
+
+    private func moveSelection(by step: Int, _ proxy: ScrollViewProxy) -> KeyPress.Result {
+        let ids = settings.ignoredBundleIDs
+        guard !ids.isEmpty else { return .ignored }
+        let current = selection.flatMap { ids.firstIndex(of: $0) }
+        let next = current.map { min(max($0 + step, 0), ids.count - 1) } ?? (step > 0 ? 0 : ids.count - 1)
+        selection = ids[next]
+        proxy.scrollTo(ids[next])
+        return .handled
     }
 
     private func removeSelected() {
