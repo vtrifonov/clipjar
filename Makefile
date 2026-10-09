@@ -1,5 +1,5 @@
 CONFIG ?= release
-VERSION ?= 0.1.0
+VERSION ?= 0.2.0
 BUILD_NUMBER ?= 1
 ARCHS ?= --arch arm64 --arch x86_64
 INSTALL_DIR ?= /Applications

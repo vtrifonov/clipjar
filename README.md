@@ -126,6 +126,12 @@ make install   # build, sign and copy Clipjar.app to /Applications
 `make app` builds a universal `build/Clipjar.app`, and `make zip` packages it as `build/Clipjar.zip`.
 `swift scripts/make-icon.swift` redraws `Resources/AppIcon.icns`.
 
+### Releasing
+
+Bump `VERSION` in the `Makefile` in a pull request. When it merges to `main`, the Release workflow tests and
+builds `Clipjar.zip` and publishes it as release `vX.Y.Z` at the merge commit. Merges that don't change the version
+don't create a release.
+
 ## Uninstall
 
 Quit Clipjar from its menu bar icon, delete `Clipjar.app` from Applications, then delete
