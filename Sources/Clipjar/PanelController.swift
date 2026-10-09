@@ -47,7 +47,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         self.restoreFocus = restoreFocus
         panel = ClipjarPanel(
             contentRect: NSRect(origin: .zero, size: PanelPlacement.size),
-            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -59,10 +59,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
-        panel.isMovable = false
+        // Dragged by any part that isn't a control (header, chips row, footer); resized from its edges.
+        panel.isMovableByWindowBackground = true
+        panel.contentMinSize = PanelPlacement.minSize
         panel.animationBehavior = .none
         panel.isReleasedWhenClosed = false
         let hosting = NSHostingView(rootView: HistoryView(model: model, settings: settings))
+        // The window owns the size; SwiftUI only reports its minimum.
+        hosting.sizingOptions = [.minSize]
         hosting.wantsLayer = true
         panel.contentView = hosting
         panel.delegate = self
@@ -201,6 +205,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         hide()
     }
 
+    func windowDidEndLiveResize(_ notification: Notification) {
+        settings.panelSize = panel.frame.size
+    }
+
     // MARK: Placement
 
     private func frame(for placement: OpenPlacement) -> NSRect? {
@@ -209,16 +217,22 @@ final class PanelController: NSObject, NSWindowDelegate {
             guard let button = statusButtonFrame(),
                   let screen = NSScreen.screens.first(where: { $0.frame.intersects(button) }) ?? NSScreen.main
             else { return frame(for: .cursor) }
-            return PanelPlacement.belowStatusItem(buttonFrame: button, visibleFrame: screen.visibleFrame)
+            return PanelPlacement.belowStatusItem(
+                buttonFrame: button, visibleFrame: screen.visibleFrame, size: size(on: screen)
+            )
         case .cursor:
             let mouse = NSEvent.mouseLocation
             guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main
             else { return nil }
-            return PanelPlacement.nearCursor(mouse, visibleFrame: screen.visibleFrame)
+            return PanelPlacement.nearCursor(mouse, visibleFrame: screen.visibleFrame, size: size(on: screen))
         case .centred:
             guard let screen = NSScreen.main ?? NSScreen.screens.first else { return nil }
-            return PanelPlacement.centred(visibleFrame: screen.visibleFrame)
+            return PanelPlacement.centred(visibleFrame: screen.visibleFrame, size: size(on: screen))
         }
+    }
+
+    private func size(on screen: NSScreen) -> CGSize {
+        PanelPlacement.fittedSize(settings.panelSize, visibleFrame: screen.visibleFrame)
     }
 
     /// Scale about the top-centre of a layer whose anchor point is its bottom-left corner.

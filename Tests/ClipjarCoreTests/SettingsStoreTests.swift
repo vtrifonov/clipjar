@@ -23,6 +23,21 @@ import Testing
         )
     }
 
+    @Test func panelSizePersists() {
+        #expect(makeSettings().panelSize == nil)
+        makeSettings().panelSize = CGSize(width: 900, height: 600)
+        #expect(makeSettings().panelSize == CGSize(width: 900, height: 600))
+        makeSettings().panelSize = nil
+        #expect(makeSettings().panelSize == nil)
+    }
+
+    @Test func malformedPanelSizeIsIgnored() {
+        defaults.set([900.0], forKey: "panelSize")
+        #expect(makeSettings().panelSize == nil)
+        defaults.set("big", forKey: "panelSize")
+        #expect(makeSettings().panelSize == nil)
+    }
+
     /// The run-loop timer doesn't advance during sleep, so wake re-checks the pause against the clock.
     @Test func wakeAfterPauseExpiryResumes() async {
         let clock = TestClock()

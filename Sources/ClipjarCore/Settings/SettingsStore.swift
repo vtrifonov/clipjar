@@ -16,6 +16,7 @@ import Observation
         static let pasteOnSelect = "pasteOnSelect"
         static let isPaused = "isPaused"
         static let pausedUntil = "pausedUntil"
+        static let panelSize = "panelSize"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -58,6 +59,17 @@ import Observation
         }
     }
 
+    /// The panel size the user last resized to; nil = the default size.
+    @ObservationIgnored public var panelSize: CGSize? {
+        didSet {
+            if let panelSize {
+                defaults.set([Double(panelSize.width), Double(panelSize.height)], forKey: Key.panelSize)
+            } else {
+                defaults.removeObject(forKey: Key.panelSize)
+            }
+        }
+    }
+
     /// `wakeNotifications` delivers `NSWorkspace.didWakeNotification`; injectable for tests.
     public init(
         defaults: UserDefaults,
@@ -77,6 +89,11 @@ import Observation
         pasteOnSelect = defaults.object(forKey: Key.pasteOnSelect) as? Bool ?? true
         isPaused = defaults.bool(forKey: Key.isPaused)
         pausedUntil = (defaults.object(forKey: Key.pausedUntil) as? Double).map(Date.init(timeIntervalSince1970:))
+        if let wh = defaults.array(forKey: Key.panelSize) as? [Double], wh.count == 2 {
+            panelSize = CGSize(width: wh[0], height: wh[1])
+        } else {
+            panelSize = nil
+        }
 
         reconcilePause()
         // AnyCancellable cancels itself when the store is released, so no deinit is needed.

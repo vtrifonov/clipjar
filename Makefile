@@ -1,5 +1,5 @@
 CONFIG ?= release
-VERSION ?= 0.1.0
+VERSION ?= 0.2.0
 BUILD_NUMBER ?= 1
 ARCHS ?= --arch arm64 --arch x86_64
 INSTALL_DIR ?= /Applications
@@ -22,7 +22,7 @@ app: build
 	cp "$(BIN_DIR)/Clipjar" "$(APP)/Contents/MacOS/Clipjar"
 	cp -R "$(BIN_DIR)"/*.bundle "$(APP)/Contents/Resources/"
 	test -d "$(APP)/Contents/Resources/KeyboardShortcuts_KeyboardShortcuts.bundle"
-	cp LICENSE THIRD_PARTY_NOTICES.md "$(APP)/Contents/Resources/"
+	cp LICENSE THIRD_PARTY_NOTICES.md Resources/AppIcon.icns "$(APP)/Contents/Resources/"
 	cp Resources/Info.plist "$(APP)/Contents/Info.plist"
 	plutil -replace CFBundleShortVersionString -string "$(VERSION)" "$(APP)/Contents/Info.plist"
 	plutil -replace CFBundleVersion -string "$(BUILD_NUMBER)" "$(APP)/Contents/Info.plist"

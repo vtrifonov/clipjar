@@ -1,23 +1,56 @@
-# Clipjar
+<p align="center">
+  <img src="docs/images/icon.png" width="128" height="128" alt="Clipjar icon">
+</p>
 
-Clipjar is a fast, keyboard-first clipboard history manager that lives in the macOS menu bar. Press a
-hotkey, type a few letters, press Return, and the clip is pasted straight into the app you were using. Your history
-stays on your Mac: Clipjar has no network code, no accounts and no analytics.
+<h1 align="center">Clipjar</h1>
 
-Requires macOS 14 or later, on Apple silicon or Intel.
+<p align="center">
+  <strong>A fast, keyboard-first clipboard history for the macOS menu bar.</strong><br>
+  Press a hotkey, type a few letters, press Return — the clip lands in the app you were using.
+</p>
+
+<p align="center">
+  <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/vtrifonov/clipjar?label=download" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-14%2B-blue" alt="macOS 14 or later">
+  <img src="https://img.shields.io/badge/Apple%20silicon%20%2B%20Intel-universal-lightgrey" alt="Universal binary">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+</p>
+
+<p align="center">
+  <img src="docs/images/panel.png" width="800" alt="The Clipjar panel: a searchable list of recent clips with a large preview of the selected image">
+</p>
+
+## Why Clipjar
+
+- **Instant.** ⇧⌘V opens the panel where you are, already focused on search. ⏎ pastes. ⌘1–⌘9 paste the first nine clips.
+- **Everything you copy.** Plain and rich text, links, images and files from Finder — each with its source app and a full preview.
+- **Private by design.** No network code, no accounts, no analytics. Passwords that apps mark as concealed are never saved, and password managers are ignored out of the box.
+- **Stays out of the way.** Lives in the menu bar, never steals focus from the app you're pasting into. Drag the panel anywhere and resize it from the corner; it remembers the size.
+
+## Search that understands what you copied
+
+<p align="center">
+  <img src="docs/images/search.png" width="800" alt="Searching for 'query' finds a code snippet and highlights each match in the preview">
+</p>
+
+Matches are highlighted as you type. Narrow things down with:
+
+| Query | Finds |
+| --- | --- |
+| `"Hello, Clipjar"` | the exact phrase |
+| `@Safari example.com` | clips copied from Safari containing `example.com` |
+| `is:text` `is:link` `is:image` `is:file` `is:pinned` | clips of one type |
+
+Or press ⇥ to cycle through the All, Text, Links, Images, Files and Pinned chips.
 
 ## Features
 
-- **Everything you copy:** plain and rich text, links, images and files from Finder.
-- **Pins:** keep clips you reuse at hand. Pinned clips are never pruned.
-- **Preview:** see the whole text, the full-size image or the file list before you paste.
-- **Search as you type:** use quotes for an exact phrase (`"Hello, Clipjar"`), `@app` to limit results to clips
-  copied from one app (`@Safari example.com`), and `is:text`, `is:link`, `is:image`, `is:file` or `is:pinned` to
-  filter by type.
-- **Type chips:** All, Text, Links, Images, Files and Pinned. Press ⇥ to cycle through them.
-- **Privacy controls:** pause capture (indefinitely or for 15 minutes), ignore specific apps, and skip anything
-  apps mark as concealed, such as passwords.
+- **Pins** keep the clips you reuse at hand. Pinned clips are never pruned.
+- **Preview** the whole text, the full-size image or the file list before you paste.
+- **Retention you control:** keep 200 to 10,000 clips (or unlimited), and drop clips older than a day, a week, a month or a year.
+- **Privacy controls:** pause capture (indefinitely or for 15 minutes) and ignore specific apps.
 - **Configurable hotkey:** ⇧⌘V by default. Change or clear it in Settings.
+- **Accessible:** full keyboard control, VoiceOver labels, and support for Reduce Motion and Increase Contrast.
 
 ## Keyboard map
 
@@ -39,7 +72,7 @@ Requires macOS 14 or later, on Apple silicon or Intel.
 
 ## Install
 
-1. Download `Clipjar.zip` from the [Releases](../../releases) page and unzip it.
+1. Download `Clipjar.zip` from the [latest release](../../releases/latest) and unzip it.
 2. Move `Clipjar.app` to your Applications folder **before you open it for the first time**. When an app runs
    straight from Downloads, macOS runs it from a randomised read-only location (App Translocation), and the
    permissions you grant it don't stick.
@@ -51,7 +84,7 @@ Requires macOS 14 or later, on Apple silicon or Intel.
 
 Clipjar is ad-hoc signed, not notarized, so macOS asks you to confirm the first launch.
 
-## Accessibility
+### Accessibility
 
 To paste for you, Clipjar needs Accessibility access: System Settings ▸ Privacy & Security ▸ Accessibility ▸ turn
 on Clipjar. Clipjar uses it only to send ⌘V to the app you were using. Without it, Return copies the clip and you
@@ -64,10 +97,22 @@ the Accessibility list, remove it with **−**, and add it again. Or run this an
 tccutil reset Accessibility com.vtrifonov.clipjar
 ```
 
-## Clipboard access
+### Clipboard access
 
 On macOS 15.4 and later, macOS may ask whether Clipjar can read the clipboard. Choose **Always Allow**. If you
 denied it, turn it back on in System Settings ▸ Privacy & Security; Clipjar shows a notice until you do.
+
+## Privacy
+
+- Everything stays on this Mac. Clipjar has no network code and no analytics.
+- History is stored unencrypted on disk, readable only by your user account.
+- Content that apps mark as concealed or transient (for example, passwords from password managers) is never saved.
+- Apps on the ignore list are never captured. Common password managers are on it by default.
+- The history folder is excluded from Time Machine backups.
+- Deleted clips are scrubbed from the database file, not just hidden.
+
+History lives in `~/Library/Application Support/Clipjar`. If the database is ever damaged, Clipjar starts with a
+fresh history and keeps the old file there with `.corrupt-` in its name. You can delete those copies.
 
 ## Build from source
 
@@ -79,20 +124,13 @@ make install   # build, sign and copy Clipjar.app to /Applications
 ```
 
 `make app` builds a universal `build/Clipjar.app`, and `make zip` packages it as `build/Clipjar.zip`.
+`swift scripts/make-icon.swift` redraws `Resources/AppIcon.icns`.
 
-## Privacy
+### Releasing
 
-- Everything stays on this Mac. Clipjar has no network code and no analytics.
-- History is stored unencrypted on disk, readable only by your user account.
-- Content that apps mark as concealed or transient (for example, passwords from password managers) is never saved.
-- Apps on the ignore list are never captured. Common password managers are on it by default.
-- The history folder is excluded from Time Machine backups.
-- Deleted clips are scrubbed from the database file, not just hidden.
-
-## Data location
-
-History lives in `~/Library/Application Support/Clipjar`. If the database is ever damaged, Clipjar starts with a
-fresh history and keeps the old file there with `.corrupt-` in its name. You can delete those copies.
+Bump `VERSION` in the `Makefile` in a pull request. When it merges to `main`, the Release workflow tests and
+builds `Clipjar.zip` and publishes it as release `vX.Y.Z` at the merge commit. Merges that don't change the version
+don't create a release.
 
 ## Uninstall
 
