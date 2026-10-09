@@ -151,7 +151,14 @@ struct HistoryView: View {
         .foregroundStyle(.tertiary)
         .lineLimit(1)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
+        .padding(.leading, 12)
+        .padding(.trailing, 28)
         .frame(height: 28)
+        .overlay(alignment: .bottomTrailing) {
+            ResizeGrip { settings.panelSize = $0 }
+                .frame(width: 20, height: 20)
+                .help("Drag to resize")
+                .accessibilityHidden(true)
+        }
     }
 }
